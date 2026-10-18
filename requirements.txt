@@ -1,6 +1,6 @@
-flask
-flask-cors
+fastapi
+uvicorn
+requests
+pydantic
 torch
 huggingface_hub
-pillow
-gunicorn
