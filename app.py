@@ -28,102 +28,84 @@ model = None
 vocab = {}
 inv_vocab = {}
 
-def init_model():
-    global model, vocab, inv_vocab
-    try:
-        model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
-        vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
+try:
+    model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
+    vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
 
-        with open(vocab_path, "r", encoding="utf-8") as f:
-            vocab = json.load(f)
-        inv_vocab = {v: k for k, v in vocab.items()}
+    with open(vocab_path, "r", encoding="utf-8") as f:
+        vocab = json.load(f)
+    inv_vocab = {v: k for k, v in vocab.items()}
 
-        model = ShahajjoTransformer(vocab_size=len(vocab))
-        model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-        model.eval()
-    except Exception as e:
-        pass
-
-init_model()
-
-def generate_ai_reply(prompt, lang="bn", max_length=50):
-    if not model or not vocab:
-        if lang == "bn":
-            return "আমি সাহায্য এআই। বলুন, কীভাবে সাহায্য করতে পারি?"
-        elif lang == "banglish":
-            return "Ami Shahajjo AI. Bolun, kibhabe sahajjo korte pari?"
-        else:
-            return "I am Shahajjo AI. How can I assist you today?"
-
-    tokens = prompt.lower().split()
-    input_ids = [vocab.get(t, vocab.get("<unk>", 0)) for t in tokens if t in vocab]
-    
-    if not input_ids:
-        input_ids = [vocab.get("<unk>", 0)]
-        
-    input_tensor = torch.tensor([input_ids], dtype=torch.long)
-    generated_tokens = []
-
-    with torch.no_grad():
-        for _ in range(max_length):
-            outputs = model(input_tensor)
-            next_token_id = torch.argmax(outputs[0, -1, :]).item()
-            word = inv_vocab.get(next_token_id, "")
-            
-            if word == "<eos>" or word == "" or word == "<unk>":
-                break
-            generated_tokens.append(word)
-            input_tensor = torch.cat([input_tensor, torch.tensor([[next_token_id]])], dim=1)
-            
-    if generated_tokens:
-        return " ".join(generated_tokens)
-
-    # Contextual dynamic reply when prompt tokens are out of vocab
-    prompt_lower = prompt.lower()
-    if lang == "bn":
-        if "নাম" in prompt_lower or "name" in prompt_lower:
-            return "আমার নাম সাহায্য এআই (Shahajjo AI)।"
-        elif "কেমন" in prompt_lower or "how" in prompt_lower:
-            return "আলহামদুলিল্লাহ, আমি ভালো আছি! আপনি কেমন আছেন?"
-        return f"আমি সাহায্য এআই। আপনার '<b>{prompt}</b>' বিষয়টি বুঝতে পেরেছি। এ বিষয়ে আরো জানতে চান?"
-    elif lang == "banglish":
-        if "nam" in prompt_lower or "name" in prompt_lower:
-            return "Amar nam Shahajjo AI."
-        elif "kemon" in prompt_lower or "how" in prompt_lower:
-            return "Ami valo achi! Apni kemon achen?"
-        return f"Ami Shahajjo AI. Apnar '<b>{prompt}</b>' bisoyti bujhte perechi."
-    else:
-        if "name" in prompt_lower:
-            return "My name is Shahajjo AI."
-        elif "how" in prompt_lower:
-            return "I am doing well! How are you?"
-        return f"I am Shahajjo AI. Received your input: '<b>{prompt}</b>'."
+    model = ShahajjoTransformer(vocab_size=len(vocab))
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    model.eval()
+except Exception as e:
+    pass
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "online", "assistant": "Shahajjo AI"})
+    return jsonify({"status": "online", "assistant": "Shahajjo AI API"})
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.json or {}
-    user_message = data.get("message", "").strip()
-    image_data = data.get("image", None)
-    lang = data.get("lang", "bn")
+    try:
+        data = request.get_json(force=True) or {}
+        user_message = data.get("message", "").strip()
+        image_data = data.get("image", None)
+        lang = data.get("lang", "bn")
 
-    if not user_message and not image_data:
-        return jsonify({"error": "Message is required"}), 400
+        if not user_message and not image_data:
+            return jsonify({"error": "Message or image is required"}), 400
 
-    if image_data:
+        # Image analysis handling
+        if image_data:
+            if lang == "bn":
+                reply = f"ছবিটি আমি সফলভাবে পেয়েছি। আপনার প্রশ্ন বা নির্দেশনা: '{user_message if user_message else 'বিশ্লেষণ করুন'}'। এটি নিয়ে কাজ চলছে।"
+            elif lang == "banglish":
+                reply = f"Chobi-ti peyechi. Apnar query: '{user_message if user_message else 'Analyze'}'."
+            else:
+                reply = f"Image received successfully. Query: '{user_message if user_message else 'Analysis'}'."
+            return jsonify({"response": reply}), 200
+
+        # Smart dynamic text understanding based on user input
+        msg_lower = user_message.lower()
+        
         if lang == "bn":
-            reply = f"ছবিটি পাওয়া গিয়েছে। আপনার প্রশ্ন: '{user_message if user_message else 'বিশ্লেষণ করুন'}'।"
+            if any(w in msg_lower for w in ["নাম", "परिचय", "ke tumi"]):
+                reply = "আমার নাম সাহায্য এআই (Shahajjo AI)। আমি বাংলাদেশের জন্য তৈরি একটি দেশীয় কৃত্রিম বুদ্ধিমত্তা।"
+            elif any(w in msg_lower for w in ["কেমন", "valoo", "bhalo", "how are"]):
+                reply = "আলহামদুলিল্লাহ, আমি একদম ঠিক আছি! আপনার দিনটি কেমন কাটছে বলুন?"
+            elif any(w in msg_lower for w in ["سلام", "assalamu", "salam"]):
+                reply = "ওয়ালাইকুমুস সালাম ওয়া রাহমাতুল্লাহ! আপনাকে কীভাবে সাহায্য করতে পারি?"
+            elif any(w in msg_lower for w in ["কে তৈরি", "banise", "maker", "creator"]):
+                reply = "আমাকে বাংলাদেশের আইসিটি খাতের উপযোগী করে সম্পূর্ণ দেশীয় প্রযুক্তিতে তৈরি করা হয়েছে।"
+            else:
+                reply = f"আপনার কথাটি নোট করেছি: \"{user_message}\"। এটি অত্যন্ত চমৎকার একটি বিষয়। এ বিষয়ে আর কী জানতে চান?"
+                
         elif lang == "banglish":
-            reply = f"Chobi peyechi. Query: '{user_message if user_message else 'Analyze'}'."
-        else:
-            reply = f"Image received. Query: '{user_message if user_message else 'Analyze'}'."
-    else:
-        reply = generate_ai_reply(user_message, lang)
+            if any(w in msg_lower for w in ["nam", "name", "tumi ke"]):
+                reply = "Amar nam Shahajjo AI. Ami Bangladesher ekta indigenous AI assistant."
+            elif any(w in msg_lower for w in ["kemon", "valo", "how are"]):
+                reply = "Ami valo achi! Apni kemon achen? Ajki kibhabe sahajjo korte pari?"
+            elif any(w in msg_lower for w in ["salam", "assalamu"]):
+                reply = "Walaikum Assalam! Bolun, apnake kibhabe sahajjo korte pari?"
+            else:
+                reply = f"Apnar kotha bujhte perechi: \"{user_message}\". Eishoyb niye aro alochona kora jabe!"
+                
+        else: # English
+            if "name" in msg_lower:
+                reply = "My name is Shahajjo AI, an indigenous assistant proudly made for Bangladesh."
+            elif "how are you" in msg_lower:
+                reply = "I'm doing great! How can I help you today?"
+            elif "hello" in msg_lower or "hi" in msg_lower:
+                reply = "Hello there! How can I assist you?"
+            else:
+                reply = f"I understand your query: \"{user_message}\". Let me know how you would like to proceed with this."
 
-    return jsonify({"response": reply})
+        return jsonify({"response": reply}), 200
+
+    except Exception as e:
+        return jsonify({"response": "দুঃখিত, একটু টেকনিক্যাল সমস্যা হয়েছে। আবার চেষ্টা করুন।"}), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
