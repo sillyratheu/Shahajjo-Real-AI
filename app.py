@@ -10,6 +10,7 @@ from huggingface_hub import hf_hub_download
 import requests
 import urllib.parse
 import re
+from duckduckgo_search import DDGS
 
 app = FastAPI(title="Shahajjo AI Engine")
 
@@ -24,7 +25,7 @@ app.add_middleware(
 REPO_ID = "Vidclip/Shahajjo"
 
 class ShahajjoTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model=128, nhead=4, num_layers=2):
+    def __init__(self, vocab_size, d_model=256, nhead=8, num_layers=4):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
@@ -65,57 +66,62 @@ def clean_output_text(text: str) -> str:
     text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
     text = re.sub(r'<.*?>', '', text)
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
-    return text.strip()
+    
+    sentences = text.split('.')
+    unique_sentences = []
+    for s in sentences:
+        s_clean = s.strip()
+        if s_clean and s_clean not in unique_sentences:
+            unique_sentences.append(s_clean)
+    return ". ".join(unique_sentences) + ("." if unique_sentences else "")
 
-def get_fast_smart_answer(query: str, lang: str = "bn", is_image: bool = False) -> str:
+def get_realtime_smart_answer(query: str, lang: str = "bn", is_image: bool = False) -> str:
     msg_lower = query.lower().strip()
 
-    # Fast Greeting & Identity Handling
-    if any(w in msg_lower for w in ["hi", "hello", "kemn", "kemon", "কেমন"]):
+    # Multi-lingual Identity Check (Bangla, Banglish, English)
+    identity_triggers = ["tumi ke", "who are you", "what is your name", "tomar nam ki", "কে তুমি", "তোমার নাম কি", "tumi konta desher", "where are you from", "kothay toiri"]
+    if any(w in msg_lower for w in identity_triggers):
         if lang == "bn":
-            return "Alhamdulillah, ami valo achi! Apnake aj kibhabe sahajjo korte pari?"
+            return "আমার নাম সাহায্য (Shahajjo AI)। আমি গণপ্রজাতন্ত্রী বাংলাদেশের একটি গর্বিত নিজস্ব কৃত্রিম বুদ্ধিমত্তা (AI) সহকারী, যা বাংলা, বাংলিশ এবং ইংরেজি ভাষায় আপনাকে সাহায্য করার জন্য তৈরি করা হয়েছে।"
         elif lang == "banglish":
-            return "Ami valo achi! Apnake aj kibhabe sahajjo korte pari?"
+            return "Amar nam Shahajjo AI. Ami Bangladesher ekta nijshwo AI assistant, ja Bangla, Banglish ebong English-e sahajjo korar jonno toiri."
         else:
-            return "Hello! I am doing great. How can Shahajjo AI assist you today?"
+            return "My name is Shahajjo AI. I am an indigenous Artificial Intelligence assistant built for Bangladesh, supporting Bangla, Banglish, and English."
 
-    if any(w in msg_lower for w in ["nam", "name", "tumi ke", "কে তুমি", "নাম"]):
-        return "Amar nam Shahajjo AI. Ami Bangladesher jonno toiri shompurno deshiyo technology er AI assistant."
+    # Greetings in 3 Languages
+    if any(w in msg_lower for w in ["hi", "hello", "kemn", "kemon", "কেমন", "how are you"]):
+        if lang == "bn":
+            return "আলহামদুলিল্লাহ, আমি সাহায্য এআই! একদম ভালো আছি। আপনাকে আজ কীভাবে সাহায্য করতে পারি?"
+        elif lang == "banglish":
+            return "Ami Shahajjo AI, valo achi! Apnake aj kibhabe sahajjo korte pari?"
+        else:
+            return "Hello! I am Shahajjo AI, doing great. How can I assist you today?"
 
-    # Wikipedia Knowledge Fetching
-    wiki_context = ""
+    # Real-time Live Web Search for Recent Events
     try:
-        search_lang = "bn" if lang == "bn" else "en"
-        encoded_query = urllib.parse.quote(query)
-        wiki_url = f"https://{search_lang}.wikipedia.org/api/rest_v1/page/summary/{encoded_query}"
-        res = requests.get(wiki_url, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            if "extract" in data and data["extract"]:
-                wiki_context = data["extract"]
+        with DDGS() as ddgs:
+            results = [r for r in ddgs.text(query, max_results=4)]
+            if results:
+                combined = " ".join([r.get('body', '') for r in results])
+                if combined:
+                    return clean_output_text(combined[:500] + ".")
     except Exception:
         pass
 
-    if wiki_context:
-        return clean_output_text(wiki_context)
-
-    # Fast Web Knowledge Synthesis Fallback
+    # Intelligent Synthesis Fallback
     try:
-        system_instruction = (
-            "You are 'Shahajjo AI' (সাহায্য), an indigenous AI assistant built for Bangladesh. "
-            "Give a direct, accurate, and natural response. Never output JSON or debug text."
-        )
+        sys_prompt = "You are 'Shahajjo AI' (সাহায্য), a powerful indigenous AI built for Bangladesh. Provide smart, reasoning-heavy responses in Bangla, Banglish, or English."
         if lang == "bn":
-            system_instruction += " Answer in pure Bangla."
+            sys_prompt += " Answer naturally in pure Bangla."
         elif lang == "banglish":
-            system_instruction += " Answer in natural Banglish."
+            sys_prompt += " Answer in natural Banglish."
         else:
-            system_instruction += " Answer in English."
+            sys_prompt += " Answer in English."
 
         if is_image:
-            system_instruction += " Note: The user has attached an image to analyze."
+            sys_prompt += " The user has provided an image for advanced multi-modal analysis."
 
-        api_url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{system_instruction}\nUser: {query}\nAnswer:")
+        api_url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{sys_prompt}\nQuery: {query}\nAnswer:")
         res = requests.get(api_url, timeout=8)
         if res.status_code == 200 and res.text.strip():
             cleaned = clean_output_text(res.text.strip())
@@ -125,15 +131,15 @@ def get_fast_smart_answer(query: str, lang: str = "bn", is_image: bool = False) 
         pass
 
     if lang == "bn":
-        return f"Ami Shahajjo AI. Apnar '{query}' proshner shothik uttor toiri kora hocche."
+        return f"আমি সাহায্য এআই। আপনার প্রদেয় '{query}' বিষয়ে বিস্তারিত তথ্য বিশ্লেষণ করা হচ্ছে।"
     elif lang == "banglish":
-        return f"Ami Shahajjo AI. Apnar '{query}' query niye kaj cholche."
+        return f"Ami Shahajjo AI. Apnar '{query}' query niye detail analysis kora hocche."
     else:
-        return f"I am Shahajjo AI. Processing request for '{query}'."
+        return f"I am Shahajjo AI. Analyzing details regarding '{query}'."
 
 @app.get("/")
 def home():
-    return {"status": "online", "assistant": "Shahajjo AI Engine"}
+    return {"status": "online", "assistant": "Shahajjo AI Engine (Made in Bangladesh)"}
 
 @app.post("/chat")
 def chat(req: ChatRequest):
@@ -145,14 +151,13 @@ def chat(req: ChatRequest):
         if not user_message and not image_data:
             raise HTTPException(status_code=400, detail="Message or image is required")
 
-        is_img = bool(image_data)
-        prompt_text = user_message if user_message else "Analyze image"
-
-        response_text = get_fast_smart_answer(prompt_text, lang, is_img)
+        prompt_text = user_message if user_message else "Analyze this image and explain details"
+        response_text = get_realtime_smart_answer(prompt_text, lang, bool(image_data))
+        
         return {"response": response_text}
 
     except Exception:
-        return {"response": "Dukkito, uttor toiri korte shomossha hoyeche. Abar chesta korun."}
+        return {"response": "দুঃখিত, তথ্য সংগ্রহ করতে একটু সমস্যা হয়েছে। আবার চেষ্টা করুন।"}
 
 if __name__ == "__main__":
     import uvicorn
