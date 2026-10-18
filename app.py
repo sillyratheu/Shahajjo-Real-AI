@@ -39,22 +39,24 @@ class ShahajjoTransformer(nn.Module):
 
 model = None
 vocab = {}
+inv_vocab = {}
 
-# PyTorch torch memory threads reduce kora
-torch.set_num_threads(1)
-
+# Load Custom PyTorch LLM from Hugging Face safely
 try:
+    torch.set_num_threads(1)
     model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
     vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
 
     with open(vocab_path, "r", encoding="utf-8") as f:
         vocab = json.load(f)
+    inv_vocab = {v: k for k, v in vocab.items()}
 
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-except Exception:
-    pass
+    print("✅ Custom PyTorch LLM loaded successfully!")
+except Exception as e:
+    print(f"⚠️ Model load note: {e}")
 
 class ChatRequest(BaseModel):
     message: Optional[str] = ""
@@ -76,11 +78,28 @@ def clean_output_text(text: str) -> str:
             unique_sentences.append(s_clean)
     return ". ".join(unique_sentences) + ("." if unique_sentences else "")
 
-def get_realtime_smart_answer(query: str, lang: str = "bn", is_image: bool = False) -> str:
+def generate_from_scratch_llm(prompt: str) -> str:
+    if model is None or not vocab:
+        return ""
+    try:
+        tokens = [vocab.get(w, 1) for w in prompt.split()[:25]]
+        if not tokens:
+            return ""
+        input_tensor = torch.tensor([tokens], dtype=torch.long)
+        with torch.no_grad():
+            outputs = model(input_tensor)
+            predicted_ids = torch.argmax(outputs, dim=-1)[0].tolist()
+            generated_words = [inv_vocab.get(idx, "") for idx in predicted_ids if idx > 2]
+            res_text = " ".join(generated_words)
+            return clean_output_text(res_text)
+    except Exception:
+        return ""
+
+def get_smart_response(query: str, lang: str = "bn", is_image: bool = False) -> str:
     msg_lower = query.lower().strip()
 
-    # Identity Triggers
-    identity_triggers = ["tumi ke", "who are you", "what is your name", "tomar nam ki", "কে তুমি", "তোমার নাম কি", "tumi konta desher", "where are you from"]
+    # Multi-lingual Identity Check
+    identity_triggers = ["tumi ke", "who are you", "what is your name", "tomar nam ki", "কে তুমি", "তোমার নাম কি", "tumi konta desher", "where are you from", "kothay toiri"]
     if any(w in msg_lower for w in identity_triggers):
         if lang == "bn":
             return "আমার নাম সাহায্য (Shahajjo AI)। আমি গণপ্রজাতন্ত্রী বাংলাদেশের একটি গর্বিত নিজস্ব কৃত্রিম বুদ্ধিমত্তা (AI) সহকারী, যা বাংলা, বাংলিশ এবং ইংরেজি ভাষায় আপনাকে সাহায্য করার জন্য তৈরি করা হয়েছে।"
@@ -89,39 +108,38 @@ def get_realtime_smart_answer(query: str, lang: str = "bn", is_image: bool = Fal
         else:
             return "My name is Shahajjo AI. I am an indigenous Artificial Intelligence assistant built for Bangladesh, supporting Bangla, Banglish, and English."
 
-    # Live Search Fallback
+    # 1. Try Custom PyTorch LLM First
+    if model is not None:
+        llm_ans = generate_from_scratch_llm(query)
+        if llm_ans and len(llm_ans) > 4:
+            return llm_ans
+
+    # 2. Live Web Search Fallback for Recent Events
     try:
         with DDGS() as ddgs:
-            results = [r for r in ddgs.text(query, max_results=4)]
+            results = [r for r in ddgs.text(query, max_results=3)]
             if results:
                 combined = " ".join([r.get('body', '') for r in results])
                 if combined:
-                    return clean_output_text(combined[:500] + ".")
+                    return clean_output_text(combined[:450] + ".")
     except Exception:
         pass
 
-    # Synthesis Fallback
+    # 3. Synthesis Fallback
     try:
         sys_prompt = "You are 'Shahajjo AI' (সাহায্য), a powerful indigenous AI built for Bangladesh."
-        if lang == "bn":
-            sys_prompt += " Answer in pure Bangla."
-        elif lang == "banglish":
-            sys_prompt += " Answer in natural Banglish."
-        else:
-            sys_prompt += " Answer in English."
-
         api_url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{sys_prompt}\nQuery: {query}\nAnswer:")
-        res = requests.get(api_url, timeout=8)
+        res = requests.get(api_url, timeout=6)
         if res.status_code == 200 and res.text.strip():
             return clean_output_text(res.text.strip())
     except Exception:
         pass
 
-    return "আমি সাহায্য এআই। উত্তরটি প্রক্রিয়া করা হচ্ছে।"
+    return "আমি সাহায্য এআই। আপনার প্রশ্নের উত্তর প্রক্রিয়া করা হচ্ছে।"
 
 @app.get("/")
 def home():
-    return {"status": "online", "assistant": "Shahajjo AI Engine (Made in Bangladesh)"}
+    return {"status": "online", "assistant": "Shahajjo AI Engine (Custom PyTorch LLM + Realtime Search)"}
 
 @app.post("/chat")
 def chat(req: ChatRequest):
@@ -134,12 +152,11 @@ def chat(req: ChatRequest):
             raise HTTPException(status_code=400, detail="Message or image is required")
 
         prompt_text = user_message if user_message else "Analyze this image"
-        response_text = get_realtime_smart_answer(prompt_text, lang, bool(image_data))
+        response_text = get_smart_response(prompt_text, lang, bool(image_data))
         
         return {"response": response_text}
-
     except Exception:
-        return {"response": "দুঃখিত, তথ্য সংগ্রহ করতে একটু সমস্যা হয়েছে।"}
+        return {"response": "দুঃখিত, সিস্টেম প্রসেসিং এ একটু সমস্যা হয়েছে।"}
 
 if __name__ == "__main__":
     import uvicorn
