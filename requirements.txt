@@ -2,4 +2,5 @@ flask
 flask-cors
 torch
 huggingface_hub
+pillow
 gunicorn
