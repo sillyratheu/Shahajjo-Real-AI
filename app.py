@@ -11,7 +11,6 @@ CORS(app)
 
 REPO_ID = "Vidclip/Shahajjo"
 
-# ১. ট্রান্সফরমার আর্কিটেকচার
 class ShahajjoTransformer(nn.Module):
     def __init__(self, vocab_size, d_model=128, nhead=4, num_layers=2):
         super().__init__()
@@ -29,7 +28,6 @@ model = None
 vocab = {}
 inv_vocab = {}
 
-# ২. সাইলেন্টলি মডেল ফাইল লোড করার লজিক
 def init_model():
     global model, vocab, inv_vocab
     try:
@@ -46,22 +44,22 @@ def init_model():
     except Exception as e:
         pass
 
-# অ্যাপ চালু হওয়ার সাথেই ব্যাকগ্রাউন্ডে ইনিশিয়ালাইজ হবে
 init_model()
 
 def generate_ai_reply(prompt, lang="bn", max_length=50):
     if not model or not vocab:
         if lang == "bn":
-            return "আমি সাহায্য এআই। আপনাকে কীভাবে সাহায্য করতে পারি?"
+            return "আমি সাহায্য এআই। বলুন, কীভাবে সাহায্য করতে পারি?"
         elif lang == "banglish":
-            return "Ami Shahajjo AI. Apnake kibhabe sahajjo korte pari?"
+            return "Ami Shahajjo AI. Bolun, kibhabe sahajjo korte pari?"
         else:
-            return "I am Shahajjo AI. How can I help you today?"
+            return "I am Shahajjo AI. How can I assist you today?"
 
-    tokens = prompt.split()
-    input_ids = [vocab.get(t, vocab.get("<unk>", 0)) for t in tokens]
+    tokens = prompt.lower().split()
+    input_ids = [vocab.get(t, vocab.get("<unk>", 0)) for t in tokens if t in vocab]
+    
     if not input_ids:
-        input_ids = [0]
+        input_ids = [vocab.get("<unk>", 0)]
         
     input_tensor = torch.tensor([input_ids], dtype=torch.long)
     generated_tokens = []
@@ -72,7 +70,7 @@ def generate_ai_reply(prompt, lang="bn", max_length=50):
             next_token_id = torch.argmax(outputs[0, -1, :]).item()
             word = inv_vocab.get(next_token_id, "")
             
-            if word == "<eos>" or word == "":
+            if word == "<eos>" or word == "" or word == "<unk>":
                 break
             generated_tokens.append(word)
             input_tensor = torch.cat([input_tensor, torch.tensor([[next_token_id]])], dim=1)
@@ -80,19 +78,30 @@ def generate_ai_reply(prompt, lang="bn", max_length=50):
     if generated_tokens:
         return " ".join(generated_tokens)
 
+    # Contextual dynamic reply when prompt tokens are out of vocab
+    prompt_lower = prompt.lower()
     if lang == "bn":
-        return "আমি সাহায্য এআই। আপনার প্রশ্নের উত্তর প্রস্তুত করছি।"
+        if "নাম" in prompt_lower or "name" in prompt_lower:
+            return "আমার নাম সাহায্য এআই (Shahajjo AI)।"
+        elif "কেমন" in prompt_lower or "how" in prompt_lower:
+            return "আলহামদুলিল্লাহ, আমি ভালো আছি! আপনি কেমন আছেন?"
+        return f"আমি সাহায্য এআই। আপনার '<b>{prompt}</b>' বিষয়টি বুঝতে পেরেছি। এ বিষয়ে আরো জানতে চান?"
     elif lang == "banglish":
-        return "Ami Shahajjo AI. Apnar proshner uttor prostut korchi."
+        if "nam" in prompt_lower or "name" in prompt_lower:
+            return "Amar nam Shahajjo AI."
+        elif "kemon" in prompt_lower or "how" in prompt_lower:
+            return "Ami valo achi! Apni kemon achen?"
+        return f"Ami Shahajjo AI. Apnar '<b>{prompt}</b>' bisoyti bujhte perechi."
     else:
-        return "I am Shahajjo AI. Processing your request."
+        if "name" in prompt_lower:
+            return "My name is Shahajjo AI."
+        elif "how" in prompt_lower:
+            return "I am doing well! How are you?"
+        return f"I am Shahajjo AI. Received your input: '<b>{prompt}</b>'."
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "status": "online",
-        "assistant": "Shahajjo AI"
-    })
+    return jsonify({"status": "online", "assistant": "Shahajjo AI"})
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -106,17 +115,16 @@ def chat():
 
     if image_data:
         if lang == "bn":
-            reply = f"ছবিটি আমি বিশ্লেষণ করেছি। প্রশ্ন: '{user_message if user_message else 'ছবি বিশ্লেষণ'}'।"
+            reply = f"ছবিটি পাওয়া গিয়েছে। আপনার প্রশ্ন: '{user_message if user_message else 'বিশ্লেষণ করুন'}'।"
         elif lang == "banglish":
-            reply = f"Chobi-ti ami bishleshon korechi. Query: '{user_message if user_message else 'Chobi bishleshon'}'."
+            reply = f"Chobi peyechi. Query: '{user_message if user_message else 'Analyze'}'."
         else:
-            reply = f"Image analyzed successfully. Query: '{user_message if user_message else 'Image analysis'}'."
+            reply = f"Image received. Query: '{user_message if user_message else 'Analyze'}'."
     else:
         reply = generate_ai_reply(user_message, lang)
 
     return jsonify({"response": reply})
 
 if __name__ == "__main__":
-    # Render Dynamic Port Catching
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
