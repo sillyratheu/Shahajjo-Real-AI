@@ -2,7 +2,6 @@ import os
 import json
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -68,51 +67,28 @@ def clean_output_text(text: str) -> str:
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
     return text.strip()
 
-def generate_from_scratch_model(prompt: str, max_length: int = 40) -> str:
-    if not model or not vocab or not inv_vocab:
-        return ""
-    
-    try:
-        tokens = [vocab.get(w, vocab.get("<unk>", 1)) for w in prompt.split()]
-        if not tokens:
-            tokens = [vocab.get("<unk>", 1)]
-            
-        input_tensor = torch.tensor([tokens], dtype=torch.long)
-        
-        generated_tokens = list(tokens)
-        model.eval()
-        with torch.no_grad():
-            for _ in range(max_length):
-                outputs = model(input_tensor)
-                next_token_logits = outputs[0, -1, :]
-                probs = F.softmax(next_token_logits, dim=-1)
-                next_token = torch.multinomial(probs, num_samples=1).item()
-                
-                generated_tokens.append(next_token)
-                input_tensor = torch.tensor([generated_tokens], dtype=torch.long)
-                
-                if next_token == vocab.get("<eos>", 2):
-                    break
-                    
-        decoded_words = [inv_vocab.get(t, "") for t in generated_tokens if t > 2]
-        result = " ".join(decoded_words)
-        return clean_output_text(result)
-    except Exception:
-        return ""
+def get_fast_smart_answer(query: str, lang: str = "bn", is_image: bool = False) -> str:
+    msg_lower = query.lower().strip()
 
-def get_autonomous_answer(query: str, lang: str = "bn", is_image: bool = False) -> str:
-    # Step 1: Try generating response autonomously using trained scratch model
-    scratch_reply = generate_from_scratch_model(query)
-    if scratch_reply and len(scratch_reply) > 5 and not "unk" in scratch_reply:
-        return scratch_reply
+    # Fast Greeting & Identity Handling
+    if any(w in msg_lower for w in ["hi", "hello", "kemn", "kemon", "কেমন"]):
+        if lang == "bn":
+            return "Alhamdulillah, ami valo achi! Apnake aj kibhabe sahajjo korte pari?"
+        elif lang == "banglish":
+            return "Ami valo achi! Apnake aj kibhabe sahajjo korte pari?"
+        else:
+            return "Hello! I am doing great. How can Shahajjo AI assist you today?"
 
-    # Step 2: Fallback to Wikipedia knowledge base for accurate facts
+    if any(w in msg_lower for w in ["nam", "name", "tumi ke", "কে তুমি", "নাম"]):
+        return "Amar nam Shahajjo AI. Ami Bangladesher jonno toiri shompurno deshiyo technology er AI assistant."
+
+    # Wikipedia Knowledge Fetching
     wiki_context = ""
     try:
         search_lang = "bn" if lang == "bn" else "en"
         encoded_query = urllib.parse.quote(query)
         wiki_url = f"https://{search_lang}.wikipedia.org/api/rest_v1/page/summary/{encoded_query}"
-        res = requests.get(wiki_url, timeout=4)
+        res = requests.get(wiki_url, timeout=3)
         if res.status_code == 200:
             data = res.json()
             if "extract" in data and data["extract"]:
@@ -123,7 +99,7 @@ def get_autonomous_answer(query: str, lang: str = "bn", is_image: bool = False) 
     if wiki_context:
         return clean_output_text(wiki_context)
 
-    # Step 3: Synthesis engine fallback for natural language completion
+    # Fast Web Knowledge Synthesis Fallback
     try:
         system_instruction = (
             "You are 'Shahajjo AI' (সাহায্য), an indigenous AI assistant built for Bangladesh. "
@@ -137,10 +113,10 @@ def get_autonomous_answer(query: str, lang: str = "bn", is_image: bool = False) 
             system_instruction += " Answer in English."
 
         if is_image:
-            system_instruction += " The user has provided an image to analyze."
+            system_instruction += " Note: The user has attached an image to analyze."
 
         api_url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{system_instruction}\nUser: {query}\nAnswer:")
-        res = requests.get(api_url, timeout=10)
+        res = requests.get(api_url, timeout=8)
         if res.status_code == 200 and res.text.strip():
             cleaned = clean_output_text(res.text.strip())
             if cleaned:
@@ -157,7 +133,7 @@ def get_autonomous_answer(query: str, lang: str = "bn", is_image: bool = False) 
 
 @app.get("/")
 def home():
-    return {"status": "online", "assistant": "Shahajjo AI Generative Engine"}
+    return {"status": "online", "assistant": "Shahajjo AI Engine"}
 
 @app.post("/chat")
 def chat(req: ChatRequest):
@@ -172,7 +148,7 @@ def chat(req: ChatRequest):
         is_img = bool(image_data)
         prompt_text = user_message if user_message else "Analyze image"
 
-        response_text = get_autonomous_answer(prompt_text, lang, is_img)
+        response_text = get_fast_smart_answer(prompt_text, lang, is_img)
         return {"response": response_text}
 
     except Exception:
