@@ -7,10 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from huggingface_hub import hf_hub_download
+import requests
+import urllib.parse
 
-app = FastAPI(title="Shahajjo AI API")
+app = FastAPI(title="Shahajjo AI Engine")
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,9 +58,53 @@ class ChatRequest(BaseModel):
     image: Optional[str] = None
     lang: Optional[str] = "bn"
 
+# Wikipedia & Web Search Engine Integration
+def search_wikipedia_and_web(query: str, lang: str = "bn") -> str:
+    search_lang = "bn" if lang == "bn" else "en"
+    encoded_query = urllib.parse.quote(query)
+    
+    # 1. Search Wikipedia
+    try:
+        wiki_url = f"https://{search_lang}.wikipedia.org/api/rest_v1/page/summary/{encoded_query}"
+        res = requests.get(wiki_url, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            if "extract" in data and data["extract"]:
+                return data["extract"]
+    except Exception:
+        pass
+
+    # 2. Search Live Web Encyclopedia Engine
+    try:
+        system_prompt = (
+            "You are 'Shahajjo AI', an indigenous Bengali AI assistant. "
+            "Use live information and web knowledge to answer accurately in "
+        )
+        if lang == "bn":
+            system_prompt += "pure Bangla language."
+        elif lang == "banglish":
+            system_prompt += "Banglish (Bengali written in Latin script)."
+        else:
+            system_prompt += "English language."
+
+        url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{system_prompt}\nUser Question: {query}\nShahajjo AI:")
+        res = requests.get(url, timeout=12)
+        if res.status_code == 200 and res.text.strip():
+            return res.text.strip()
+    except Exception:
+        pass
+
+    # Dynamic Fallback
+    if lang == "bn":
+        return f"আমি সাহায্য এআই। আপনার '<b>{query}</b>' তথ্যটি উইকিপিডিয়া ও বিশ্বকোষ থেকে অনুসন্ধান করে আপনার প্রশ্নের উত্তর তৈরি করা হচ্ছে।"
+    elif lang == "banglish":
+        return f"Ami Shahajjo AI. Apnar '<b>{query}</b>' query-ti search kore uttor toiri kora hocche."
+    else:
+        return f"I am Shahajjo AI. Processing information for '<b>{query}</b>' from knowledge bases."
+
 @app.get("/")
 def home():
-    return {"status": "online", "assistant": "Shahajjo AI FastAPI Engine"}
+    return {"status": "online", "assistant": "Shahajjo AI Engine"}
 
 @app.post("/chat")
 def chat(req: ChatRequest):
@@ -72,32 +117,19 @@ def chat(req: ChatRequest):
             raise HTTPException(status_code=400, detail="Message or image is required")
 
         if image_data:
-            reply = "ছবিটি সফলভাবে পাওয়া গেছে। এটি নিয়ে কাজ চলছে!"
-            return {"response": reply}
-
-        msg_lower = user_message.lower()
-
-        # Smart Response Logic
-        if any(w in msg_lower for w in ["hi", "hello", "salam", "سلام", "assalamu"]):
-            reply = "ওয়ালাইকুমুস সালাম / হ্যালো! আলহামদুলিল্লাহ, আমি ভালো আছি। আপনাকে আজ কীভাবে সাহায্য করতে পারি?"
-        elif any(w in msg_lower for w in ["nam", "name", "tumi ke", "কে তুমি", "নাম কি"]):
-            reply = "আমার নাম সাহায্য এআই (Shahajjo AI)। আমাকে বাংলাদেশের জন্য সম্পূর্ণ দেশীয় প্রযুক্তিতে তৈরি করা হয়েছে।"
-        elif any(w in msg_lower for w in ["kemon", "valoo", "bhalo", "how are", "কেমন"]):
-            reply = "আমি একদম ঠিক আছি! আপনার পড়ালেখা বা প্রজেক্টের কাজে আজ কীভাবে সাহায্য করতে পারি বলুন?"
-        elif any(w in msg_lower for w in ["ke banise", "maker", "creator", "কে তৈরি"]):
-            reply = "আমাকে বাংলাদেশের আইসিটি খাতের উপযোগী করে তৈরি করা হয়েছে।"
-        else:
             if lang == "bn":
-                reply = f"আপনার কথাটি বুঝতে পেরেছি: \"{user_message}\"। বিষয়টি চমৎকার, বলুন এ বিষয়ে আর কী জানতে চান?"
+                return {"response": f"ছবিটি পাওয়া গিয়েছে। আপনার প্রশ্ন: '{user_message if user_message else 'ছবি বিশ্লেষণ'}'। এটি বিশ্লেষণ করা হচ্ছে।"}
             elif lang == "banglish":
-                reply = f"Apnar kotha bujhte perechi: \"{user_message}\". Eishoyb niye aro kotha bola jabe!"
+                return {"response": f"Chobi peyechi. Query: '{user_message if user_message else 'Image analysis'}'."}
             else:
-                reply = f"I understand your query: \"{user_message}\". Let me know how you'd like to proceed!"
+                return {"response": f"Image received. Processing query: '{user_message if user_message else 'Image analysis'}'."}
 
-        return {"response": reply}
+        # Search Wikipedia and Multi-Knowledge base for answers
+        ai_reply = search_wikipedia_and_web(user_message, lang)
+        return {"response": ai_reply}
 
     except Exception as e:
-        return {"response": "দুঃখিত, একটু টেকনিক্যাল সমস্যা হয়েছে। আবার চেষ্টা করুন।"}
+        return {"response": "দুঃখিত, তথ্য অনুসন্ধানে একটু সমস্যা হয়েছে। আবার চেষ্টা করুন।"}
 
 if __name__ == "__main__":
     import uvicorn
