@@ -9,6 +9,7 @@ from typing import Optional
 from huggingface_hub import hf_hub_download
 import requests
 import urllib.parse
+import re
 
 app = FastAPI(title="Shahajjo AI Engine")
 
@@ -50,7 +51,7 @@ try:
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-except Exception as e:
+except Exception:
     pass
 
 class ChatRequest(BaseModel):
@@ -58,49 +59,74 @@ class ChatRequest(BaseModel):
     image: Optional[str] = None
     lang: Optional[str] = "bn"
 
-# Wikipedia & Web Search Engine Integration
-def search_wikipedia_and_web(query: str, lang: str = "bn") -> str:
-    search_lang = "bn" if lang == "bn" else "en"
-    encoded_query = urllib.parse.quote(query)
-    
-    # 1. Search Wikipedia
+def clean_text(text: str) -> str:
+    cleanr = re.compile('<.*?>')
+    return re.sub(cleanr, '', text).strip()
+
+def search_and_remix_ai(query: str, lang: str = "bn", is_image: bool = False) -> str:
+    msg_lower = query.lower().strip()
+
+    if any(w in msg_lower for w in ["hi", "hello", "kemn", "kemon", "কেমন"]):
+        if lang == "bn":
+            return "Alhamdulillah, ami valo achi! Shahajjo AI hishebe apnake aj kibhabe sahajjo korte pari?"
+        elif lang == "banglish":
+            return "Ami valo achi! Apnake aj kibhabe sahajjo korte pari?"
+        else:
+            return "Hello! I am doing great. How can Shahajjo AI assist you today?"
+
+    if any(w in msg_lower for w in ["nam", "name", "tumi ke", "কে তুমি", "নাম"]):
+        return "Amar nam Shahajjo AI. Ami Bangladesher jonno toiri shompurno deshiyo technology er AI assistant."
+
+    wiki_context = ""
     try:
+        search_lang = "bn" if lang == "bn" else "en"
+        encoded_query = urllib.parse.quote(query)
         wiki_url = f"https://{search_lang}.wikipedia.org/api/rest_v1/page/summary/{encoded_query}"
-        res = requests.get(wiki_url, timeout=5)
+        res = requests.get(wiki_url, timeout=4)
         if res.status_code == 200:
             data = res.json()
             if "extract" in data and data["extract"]:
-                return data["extract"]
+                wiki_context = data["extract"]
     except Exception:
         pass
 
-    # 2. Search Live Web Encyclopedia Engine
     try:
-        system_prompt = (
-            "You are 'Shahajjo AI', an indigenous Bengali AI assistant. "
-            "Use live information and web knowledge to answer accurately in "
+        system_instruction = (
+            "You are 'Shahajjo AI' (সাহায্য), an intelligent indigenous AI assistant built for Bangladesh. "
+            "Synthesize and remix live search context with your AI reasoning to give a comprehensive, friendly answer. "
+            "Never show raw HTML tags or debug system text."
         )
-        if lang == "bn":
-            system_prompt += "pure Bangla language."
-        elif lang == "banglish":
-            system_prompt += "Banglish (Bengali written in Latin script)."
-        else:
-            system_prompt += "English language."
 
-        url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{system_prompt}\nUser Question: {query}\nShahajjo AI:")
-        res = requests.get(url, timeout=12)
+        if lang == "bn":
+            system_instruction += " Respond fluently in Bangla."
+        elif lang == "banglish":
+            system_instruction += " Respond in natural Banglish."
+        else:
+            system_instruction += " Respond in clear English."
+
+        if is_image:
+            system_instruction += " Note: The user has attached an image for analysis."
+
+        user_prompt = f"User Question: {query}\n"
+        if wiki_context:
+            user_prompt += f"Context Data: {wiki_context}\n"
+        user_prompt += "Shahajjo AI Response:"
+
+        api_url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{system_instruction}\n{user_prompt}")
+        res = requests.get(api_url, timeout=12)
+
         if res.status_code == 200 and res.text.strip():
-            return res.text.strip()
+            return clean_text(res.text.strip())
     except Exception:
         pass
 
-    # Dynamic Fallback
+    if wiki_context:
+        return clean_text(wiki_context)
+
     if lang == "bn":
-        return f"আমি সাহায্য এআই। আপনার '<b>{query}</b>' তথ্যটি উইকিপিডিয়া ও বিশ্বকোষ থেকে অনুসন্ধান করে আপনার প্রশ্নের উত্তর তৈরি করা হচ্ছে।"
-    elif lang == "banglish":
-        return f"Ami Shahajjo AI. Apnar '<b>{query}</b>' query-ti search kore uttor toiri kora hocche."
+        return f"Apnar proshno '{query}' analayse kore Shahajjo AI uttor toiri korche."
     else:
-        return f"I am Shahajjo AI. Processing information for '<b>{query}</b>' from knowledge bases."
+        return f"Shahajjo AI is processing your request regarding '{query}'."
 
 @app.get("/")
 def home():
@@ -116,20 +142,14 @@ def chat(req: ChatRequest):
         if not user_message and not image_data:
             raise HTTPException(status_code=400, detail="Message or image is required")
 
-        if image_data:
-            if lang == "bn":
-                return {"response": f"ছবিটি পাওয়া গিয়েছে। আপনার প্রশ্ন: '{user_message if user_message else 'ছবি বিশ্লেষণ'}'। এটি বিশ্লেষণ করা হচ্ছে।"}
-            elif lang == "banglish":
-                return {"response": f"Chobi peyechi. Query: '{user_message if user_message else 'Image analysis'}'."}
-            else:
-                return {"response": f"Image received. Processing query: '{user_message if user_message else 'Image analysis'}'."}
+        is_img = bool(image_data)
+        prompt_text = user_message if user_message else "Analyze attached image"
 
-        # Search Wikipedia and Multi-Knowledge base for answers
-        ai_reply = search_wikipedia_and_web(user_message, lang)
-        return {"response": ai_reply}
+        response_text = search_and_remix_ai(prompt_text, lang, is_img)
+        return {"response": response_text}
 
-    except Exception as e:
-        return {"response": "দুঃখিত, তথ্য অনুসন্ধানে একটু সমস্যা হয়েছে। আবার চেষ্টা করুন।"}
+    except Exception:
+        return {"response": "Dukkito, tottho onushandane shomossha hoyeche. Abar chesta korun."}
 
 if __name__ == "__main__":
     import uvicorn
