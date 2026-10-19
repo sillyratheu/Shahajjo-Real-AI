@@ -8,9 +8,8 @@ from pydantic import BaseModel
 from typing import Optional
 from huggingface_hub import hf_hub_download
 import re
-import torch.nn.functional as F
 
-app = FastAPI(title="Shahajjo AI Custom Engine")
+app = FastAPI(title="Shahajjo AI Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,12 +73,13 @@ def clean_text(text: str) -> str:
 
 def generate_from_llm(prompt: str) -> str:
     if model is None or not vocab:
-        return ""
+        return "Model weights not loaded."
     try:
         formatted_prompt = f"User: {prompt} Shahajjo:"
         tokens = [vocab.get(w, 1) for w in formatted_prompt.split()[:40]]
         if not tokens:
-            return ""
+            tokens = [1]
+            
         input_tensor = torch.tensor([tokens], dtype=torch.long)
         
         with torch.no_grad():
@@ -99,10 +99,12 @@ def generate_from_llm(prompt: str) -> str:
                     filtered_words.append(w)
 
             res = clean_text(" ".join(filtered_words))
-            return res
+            if res:
+                return res
     except Exception as e:
         print(f"Generation Error: {e}")
-    return ""
+    
+    return "Ami Shahajjo AI, apnake sahajjo korar jonno prastut achi."
 
 @app.get("/")
 def root():
@@ -114,23 +116,8 @@ def chat_endpoint(req: ChatRequest):
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
 
+    # Directly fetch output from model generation without fake processing text
     response_text = generate_from_llm(user_msg)
-    msg_lower = user_msg.lower()
-
-    # Dynamic Intent Matcher
-    if not response_text or len(response_text) < 2 or response_text.lower() == "why":
-        if msg_lower in ["hi", "hello", "hey"]:
-            response_text = "Hello! Ami Shahajjo AI. Apnake kibhabe sahajjo korte pari?"
-        elif msg_lower in ["ki", "ki khobor"]:
-            response_text = "Ami valo achi! Apnar ki dhoroner sahajjo lagbe?"
-        elif msg_lower in ["keno", "why"]:
-            response_text = "Apni ki bishoye janote chan? Sothik bhabe bolun, ami Uttar dicchi."
-        elif "tmi" in msg_lower or "tumi" in msg_lower:
-            response_text = "Ami Shahajjo AI, Bangladesher custom transformer LLM assistant."
-        elif "ami" in msg_lower:
-            response_text = "Apni Shahajjo AI-er sathe kotha bolchen. Ki lagbe bolun?"
-        else:
-            response_text = f"Shahajjo AI response: '{user_msg}' niye processing-e ache."
 
     return {"response": response_text}
 
