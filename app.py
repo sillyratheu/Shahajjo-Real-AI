@@ -9,7 +9,7 @@ from typing import Optional
 from huggingface_hub import hf_hub_download
 import re
 
-app = FastAPI(title="Shahajjo Pure LLM API")
+app = FastAPI(title="Shahajjo Pure LLM Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +38,7 @@ model = None
 vocab = {}
 inv_vocab = {}
 
+# Load custom model safely on CPU
 try:
     torch.set_num_threads(1)
     model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
@@ -50,9 +51,9 @@ try:
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    print("Pure LLM loaded successfully!")
+    print("✅ Custom Shahajjo LLM loaded successfully!")
 except Exception as e:
-    print(f"Error loading model: {e}")
+    print(f"⚠️ Model Loading Error: {e}")
 
 class ChatRequest(BaseModel):
     message: str
@@ -66,9 +67,9 @@ def clean_text(text: str) -> str:
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
     return text.strip()
 
-def generate_response(prompt: str) -> str:
+def generate_from_llm(prompt: str) -> str:
     if model is None or not vocab:
-        return "Model is loading or not available."
+        return ""
     try:
         tokens = [vocab.get(w, 1) for w in prompt.split()[:25]]
         if not tokens:
@@ -80,23 +81,24 @@ def generate_response(prompt: str) -> str:
             generated_words = [inv_vocab.get(idx, "") for idx in predicted_ids if idx > 2]
             return clean_text(" ".join(generated_words))
     except Exception:
-        return "Error during text generation."
+        return ""
 
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo Pure LLM API"}
+    return {"status": "online", "model": "Shahajjo Custom LLM Engine"}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
     user_msg = (req.message or "").strip()
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
+
+    response_text = generate_from_llm(user_msg)
     
-    reply = generate_response(user_msg)
-    if not reply or len(reply) < 2:
-        reply = "Ami Shahajjo AI. Apnar kotha bujhchi."
-        
-    return {"response": reply}
+    if not response_text or len(response_text) < 2:
+        response_text = "আমি সাহায্য এআই। আপনার বার্তা বিশ্লেষণ করা হচ্ছে..."
+
+    return {"response": response_text}
 
 if __name__ == "__main__":
     import uvicorn
