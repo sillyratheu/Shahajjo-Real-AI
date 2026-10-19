@@ -22,7 +22,7 @@ app.add_middleware(
 REPO_ID = "Vidclip/Shahajjo"
 
 class ShahajjoTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model=256, nhead=8, num_layers=4):
+    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
@@ -45,7 +45,13 @@ try:
 
     with open(vocab_path, "r", encoding="utf-8") as f:
         vocab = json.load(f)
-    inv_vocab = {v: k for k, v in vocab.items()}
+    
+    # Ensuring inverse vocab safely maps keys and values
+    inv_vocab = {}
+    for k, v in vocab.items():
+        inv_vocab[int(v)] = k
+        inv_vocab[str(v)] = k
+        inv_vocab[k] = k
 
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
@@ -70,26 +76,33 @@ def generate_from_llm(prompt: str) -> str:
     if model is None or not vocab:
         return ""
     try:
-        tokens = [vocab.get(w, 1) for w in prompt.split()[:25]]
+        tokens = [vocab.get(w, 1) for w in prompt.split()[:40]]
         if not tokens:
             return ""
         input_tensor = torch.tensor([tokens], dtype=torch.long)
         with torch.no_grad():
             outputs = model(input_tensor)
             predicted_ids = torch.argmax(outputs, dim=-1)[0].tolist()
-            generated_words = [inv_vocab.get(idx, "") for idx in predicted_ids if idx > 2]
             
+            # FIXED: Safely translating token IDs back to real text words using inv_vocab
+            generated_words = []
+            for idx in predicted_ids:
+                if idx > 3:
+                    word = inv_vocab.get(idx, inv_vocab.get(str(idx), ""))
+                    if word:
+                        generated_words.append(word)
+
             # Prevent single word repetition loops like "Why why why"
             filtered_words = []
             for w in generated_words:
                 if w and w not in filtered_words:
                     filtered_words.append(w)
-            
+
             res = clean_text(" ".join(filtered_words))
             if len(res) > 2 and res.lower() != "why":
                 return res
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Generation Error: {e}")
     return ""
 
 @app.get("/")
@@ -103,11 +116,11 @@ def chat_endpoint(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Message is required")
 
     response_text = generate_from_llm(user_msg)
-    
+
     if not response_text or len(response_text) < 2 or response_text.lower() == "why":
         msg_lower = user_msg.lower()
         is_english = all(ord(c) < 128 for c in user_msg if c.isalpha())
-        
+
         if is_english or "hello" in msg_lower or "hi" in msg_lower:
             response_text = "Hello! I am Shahajjo AI, built for Bangladesh. How can I help you?"
         elif any(b in msg_lower for b in ["ki", "keno", "kmn", "aschhi", "korbo", "tmi", "amar", "nam"]):
