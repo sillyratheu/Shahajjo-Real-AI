@@ -12,7 +12,7 @@ import urllib.parse
 import re
 from duckduckgo_search import DDGS
 
-app = FastAPI(title="Shahajjo AI LLM & Tutor API")
+app = FastAPI(title="Shahajjo AI Light Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +41,7 @@ model = None
 vocab = {}
 inv_vocab = {}
 
-# Load Custom PyTorch LLM with memory optimization for Render
+# Load Custom PyTorch LLM safely
 try:
     torch.set_num_threads(1)
     model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
@@ -56,7 +56,7 @@ try:
     model.eval()
     print("✅ Custom PyTorch LLM loaded successfully!")
 except Exception as e:
-    print(f"⚠️ Model load note: {e}")
+    print(f"⚠️ LLM Note: {e}")
 
 class ChatRequest(BaseModel):
     message: str
@@ -86,24 +86,24 @@ def generate_from_llm(prompt: str) -> str:
     except Exception:
         return ""
 
-def get_tutor_response(query: str, lang: str = "bn") -> str:
+def get_smart_tutor_response(query: str, lang: str = "bn") -> str:
     msg_lower = query.lower().strip()
 
-    # Identity Check
+    # Identity Check (Bangla, Banglish, English)
     identity_triggers = ["tumi ke", "who are you", "what is your name", "tomar nam ki", "কে তুমি", "তোমার নাম কি"]
     if any(w in msg_lower for w in identity_triggers):
         if lang == "bn":
-            return "আমার নাম সাহায্য (Shahajjo AI Tutor)। আমি বাংলাদেশের একটি নিজস্ব কৃত্রিম বুদ্ধিমত্তা সহকারী, যা আপনাকে শিখাতে ও সাহায্য করতে তৈরি!"
+            return "আমার নাম সাহায্য (Shahajjo AI)। আমি বাংলাদেশের একটি নিজস্ব কৃত্রিম বুদ্ধিমত্তা সহকারী, যা বাংলা, বাংলিশ ও ইংরেজি ভাষায় প্রশ্নের উত্তর দিতে তৈরি।"
         elif lang == "banglish":
-            return "Ami Shahajjo AI Tutor. Ami Bangladesher nijshwo AI assistant, apnake sahajjo korar jonno toiri!"
+            return "Amar nam Shahajjo AI. Ami Bangladesher ekta nijshwo AI assistant!"
         else:
-            return "I am Shahajjo AI Tutor, an indigenous assistant built for Bangladesh."
+            return "My name is Shahajjo AI, an indigenous AI assistant built for Bangladesh."
 
-    # 1. Try Custom LLM First
+    # 1. Custom PyTorch LLM (Nij theke uttor dibe)
     if model is not None:
         llm_res = generate_from_llm(query)
         if llm_res and len(llm_res) > 3:
-            return f"{llm_res}"
+            return llm_res
 
     # 2. DuckDuckGo Realtime Search Fallback
     try:
@@ -117,18 +117,28 @@ def get_tutor_response(query: str, lang: str = "bn") -> str:
     except Exception:
         pass
 
-    return "দুঃখিত, এই মুহূর্তে উত্তর প্রক্রিয়া করা যাচ্ছে না।"
+    # 3. Web Synthesis Fallback
+    try:
+        sys_prompt = "You are 'Shahajjo AI', a smart educational tutor for Bangladesh."
+        api_url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{sys_prompt}\nQuery: {query}\nAnswer:")
+        res = requests.get(api_url, timeout=6)
+        if res.status_code == 200 and res.text.strip():
+            return clean_text(res.text.strip())
+    except Exception:
+        pass
+
+    return "আমি সাহায্য এআই। আপনার প্রশ্নের উত্তর প্রক্রিয়া করা হচ্ছে।"
 
 @app.get("/")
 def root():
-    return {"status": "online", "assistant": "Shahajjo AI LLM & Tutor API"}
+    return {"status": "online", "service": "Shahajjo AI Light API Engine"}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
     user_msg = (req.message or "").strip()
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
-    reply = get_tutor_response(user_msg, req.lang or "bn")
+    reply = get_smart_tutor_response(user_msg, req.lang or "bn")
     return {"response": reply}
 
 if __name__ == "__main__":
