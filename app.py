@@ -46,7 +46,6 @@ try:
     with open(vocab_path, "r", encoding="utf-8") as f:
         vocab = json.load(f)
     
-    # Ensuring inverse vocab safely maps keys and values
     inv_vocab = {}
     for k, v in vocab.items():
         inv_vocab[int(v)] = k
@@ -70,6 +69,8 @@ def clean_text(text: str) -> str:
     text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
     text = re.sub(r'<.*?>', '', text)
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
+    # Automatically remove 'Shahajjo:' or leading tags
+    text = re.sub(r'^shahajjo\s*:\s*', '', text, flags=re.IGNORECASE)
     return text.strip()
 
 def generate_from_llm(prompt: str) -> str:
@@ -84,7 +85,6 @@ def generate_from_llm(prompt: str) -> str:
             outputs = model(input_tensor)
             predicted_ids = torch.argmax(outputs, dim=-1)[0].tolist()
             
-            # FIXED: Safely translating token IDs back to real text words using inv_vocab
             generated_words = []
             for idx in predicted_ids:
                 if idx > 3:
@@ -92,13 +92,16 @@ def generate_from_llm(prompt: str) -> str:
                     if word:
                         generated_words.append(word)
 
-            # Prevent single word repetition loops like "Why why why"
             filtered_words = []
             for w in generated_words:
                 if w and w not in filtered_words:
                     filtered_words.append(w)
 
             res = clean_text(" ".join(filtered_words))
+            
+            if res.lower().startswith("shahajjo"):
+                res = res[8:].strip()
+
             if len(res) > 2 and res.lower() != "why":
                 return res
     except Exception as e:
