@@ -50,9 +50,9 @@ try:
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    print("✅ Custom Shahajjo LLM loaded successfully!")
+    print("Custom Shahajjo LLM loaded successfully!")
 except Exception as e:
-    print(f"⚠️ Model Loading Error: {e}")
+    print(f"Model Loading Error: {e}")
 
 class ChatRequest(BaseModel):
     message: str
@@ -61,7 +61,7 @@ class ChatRequest(BaseModel):
 def clean_text(text: str) -> str:
     if not text:
         return ""
-    text = re.sub(r'\{.*?\}', '', text, flags=root_flag := re.DOTALL)
+    text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
     text = re.sub(r'<.*?>', '', text)
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
     return text.strip()
@@ -95,13 +95,12 @@ def chat_endpoint(req: ChatRequest):
     response_text = generate_from_llm(user_msg)
     
     if not response_text or len(response_text) < 2:
-        # Detect language and fallback accordingly without any analysis text
         msg_lower = user_msg.lower()
         is_english = all(ord(c) < 128 for c in user_msg if c.isalpha())
         
         if is_english:
             response_text = "Hello! I am Shahajjo AI. How can I help you?"
-        elif any(b in msg_lower for b in ["ki",",","keno","kmn","aschhi","korbo","tmi","amar"]):
+        elif any(b in msg_lower for b in ["ki", "keno", "kmn", "aschhi", "korbo", "tmi", "amar"]):
             response_text = "Ami Shahajjo AI. Apnar kotha bujhchi, bolun ki korte hobe."
         else:
             response_text = "আমি সাহায্য এআই। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?"
