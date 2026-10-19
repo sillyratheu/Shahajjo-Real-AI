@@ -37,34 +37,52 @@ class ShahajjoTransformer(nn.Module):
 model = None
 stoi = {}
 itos = {}
+load_error_msg = ""
 
-try:
-    torch.set_num_threads(1)
-    model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
-    vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
-    config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
+def load_shahajjo_model():
+    global model, stoi, itos, load_error_msg
+    try:
+        torch.set_num_threads(1)
+        model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
+        vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
 
-    with open(vocab_path, "r", encoding="utf-8") as f:
-        vocab_data = json.load(f)
-        stoi = vocab_data.get("stoi", {})
-        # JSON keys are always strings, map them back to integer keys for itos
-        raw_itos = vocab_data.get("itos", {})
-        itos = {int(k): v for k, v in raw_itos.items()}
+        with open(vocab_path, "r", encoding="utf-8") as f:
+            vocab_data = json.load(f)
+            if "stoi" in vocab_data:
+                stoi = vocab_data["stoi"]
+                itos = {int(k): v for k, v in vocab_data["itos"].items()}
+            else:
+                # Fallback if raw vocab dictionary saved directly
+                stoi = vocab_data
+                itos = {int(v): k for k, v in vocab_data.items()}
 
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
+        # Try downloading config if exists
+        d_model, nhead, num_layers = 256, 4, 4
+        try:
+            config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                d_model = config.get("d_model", 256)
+                nhead = config.get("nhead", 4)
+                num_layers = config.get("num_layers", 4)
+        except Exception:
+            pass
 
-    d_model = config.get("d_model", 256)
-    nhead = config.get("nhead", 4)
-    num_layers = config.get("num_layers", 4)
-    vocab_size = config.get("vocab_size", len(stoi))
+        vocab_size = len(stoi)
+        if vocab_size == 0:
+            vocab_size = 1000  # Fallback safety
 
-    model = ShahajjoTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-    model.eval()
-    print("Shahajjo Native LLM Engine loaded successfully!")
-except Exception as e:
-    print(f"Model Loading Error: {e}")
+        model = ShahajjoTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
+        model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+        model.eval()
+        load_error_msg = ""
+        print("🎉 Shahajjo Native LLM Engine loaded successfully!")
+    except Exception as e:
+        load_error_msg = str(e)
+        print(f"❌ Model Loading Error: {e}")
+
+# Initial load attempt
+load_shahajjo_model()
 
 class ChatRequest(BaseModel):
     message: str
@@ -77,10 +95,16 @@ def decode(indices):
     return "".join([itos.get(i, "") for i in indices])
 
 def generate_from_llm(prompt: str) -> str:
-    if model is None or not stoi or not itos:
-        return "[Error: Model weights or Vocabulary not loaded]"
+    global model, stoi, itos
+    
+    # Retry loading if model failed earlier
+    if model is None or not stoi:
+        load_shahajjo_model()
+
+    if model is None or not stoi:
+        return f"[Error loading model weights/vocab: {load_error_msg}]"
+
     try:
-        # User Prompt-কে সঠিক চ্যাট ফরম্যাটে নেওয়া
         formatted_prompt = f"User: {prompt} Shahajjo:"
         input_ids = encode(formatted_prompt)
 
@@ -90,22 +114,22 @@ def generate_from_llm(prompt: str) -> str:
         current_tensor = torch.tensor([input_ids], dtype=torch.long)
         generated_ids = []
 
-        temperature = 0.7  # Creativity scale
-        max_length = 60    # Maximum characters to generate
+        temperature = 0.7
+        max_length = 60
 
         with torch.no_grad():
             for _ in range(max_length):
                 outputs = model(current_tensor)
                 next_token_logits = outputs[0, -1, :] / temperature
 
-                # Anti-repetition penalty (থামানো বা লুপ ভাঙার জন্য)
-                for prev_id in generated_ids[-10:]:  # Last 10 tokens check
-                    next_token_logits[prev_id] -= 3.0
+                # Anti-repetition penalty
+                for prev_id in generated_ids[-8:]:
+                    if prev_id < next_token_logits.size(0):
+                        next_token_logits[prev_id] -= 3.0
 
                 probs = F.softmax(next_token_logits, dim=-1)
                 next_token_id = torch.multinomial(probs, num_samples=1).item()
 
-                # 'newline' বা ইউজার টোকেন প্রম্পট এলে থামানো
                 char_gen = itos.get(next_token_id, "")
                 if char_gen == "\n" or "User:" in decode(generated_ids):
                     break
@@ -116,7 +140,6 @@ def generate_from_llm(prompt: str) -> str:
 
         raw_output = decode(generated_ids).strip()
         
-        # 'User:' শব্দ ফিল্টার আউট করা
         if "User:" in raw_output:
             raw_output = raw_output.split("User:")[0].strip()
 
@@ -130,7 +153,7 @@ def generate_from_llm(prompt: str) -> str:
 
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo Native Neural Engine"}
+    return {"status": "online", "model": "Shahajjo Native Neural Engine", "loaded": model is not None}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
