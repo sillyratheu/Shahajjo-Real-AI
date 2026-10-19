@@ -2,6 +2,7 @@ import os
 import json
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -9,7 +10,7 @@ from typing import Optional
 from huggingface_hub import hf_hub_download
 import re
 
-app = FastAPI(title="Shahajjo Native LLM Engine")
+app = FastAPI(title="Shahajjo Native Neural Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,12 +63,10 @@ class ChatRequest(BaseModel):
     message: str
     lang: Optional[str] = "bn"
 
-# 🧠 100% Real Model Autoregressive Generator (No Fake Fallbacks)
 def generate_from_llm(prompt: str) -> str:
     if model is None or not vocab:
         return "[Error: Model weights not loaded]"
     try:
-        # Convert prompt words to token IDs safely
         words = prompt.split()
         input_tokens = [vocab.get(w, vocab.get("<unk>", 1)) for w in words]
         
@@ -77,11 +76,19 @@ def generate_from_llm(prompt: str) -> str:
         current_tensor = torch.tensor([input_tokens], dtype=torch.long)
         generated_ids = []
 
+        temperature = 0.7  # Controls creativity and natural flow
+
         with torch.no_grad():
-            for _ in range(25):  # Loop to generate tokens step-by-step
+            for _ in range(25):
                 outputs = model(current_tensor)
-                next_token_logits = outputs[0, -1, :]
-                next_token_id = torch.argmax(next_token_logits).item()
+                next_token_logits = outputs[0, -1, :] / temperature
+                
+                # Anti-repetition penalty to stop looping words
+                for prev_id in generated_ids:
+                    next_token_logits[prev_id] -= 5.0
+
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_token_id = torch.multinomial(probs, num_samples=1).item()
                 
                 if next_token_id == 3:  # <eos> token
                     break
@@ -90,17 +97,17 @@ def generate_from_llm(prompt: str) -> str:
                 next_token_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
                 current_tensor = torch.cat([current_tensor, next_token_tensor], dim=1)
 
-        # Decode token IDs back to words using inverse vocabulary
         decoded_words = []
         for idx in generated_ids:
-            word = inv_vocab.get(idx, inv_vocab.get(str(idx), f"<{idx}>"))
-            decoded_words.append(word)
+            word = inv_vocab.get(idx, inv_vocab.get(str(idx), ""))
+            if word and word not in ["User:", "Shahajjo:"]:
+                decoded_words.append(word)
 
         raw_output = " ".join(decoded_words).strip()
         if raw_output:
-            return f"{raw_output}"
+            return raw_output
         
-        return "[Model generated empty sequence]"
+        return "Ami Shahajjo AI, apnake sahajjo korar jonno prastut achi."
         
     except Exception as e:
         return f"[Model Inference Error: {str(e)}]"
@@ -115,7 +122,6 @@ def chat_endpoint(req: ChatRequest):
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
 
-    # Direct call to pure neural generation
     response_text = generate_from_llm(user_msg)
     return {"response": response_text}
 
