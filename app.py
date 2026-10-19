@@ -7,12 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from huggingface_hub import hf_hub_download
-import requests
-import urllib.parse
 import re
-from duckduckgo_search import DDGS
 
-app = FastAPI(title="Shahajjo AI Light Engine")
+app = FastAPI(title="Shahajjo Pure LLM API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +38,6 @@ model = None
 vocab = {}
 inv_vocab = {}
 
-# Load Custom PyTorch LLM safely
 try:
     torch.set_num_threads(1)
     model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
@@ -54,9 +50,9 @@ try:
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    print("✅ Custom PyTorch LLM loaded successfully!")
+    print("Pure LLM loaded successfully!")
 except Exception as e:
-    print(f"⚠️ LLM Note: {e}")
+    print(f"Error loading model: {e}")
 
 class ChatRequest(BaseModel):
     message: str
@@ -70,11 +66,11 @@ def clean_text(text: str) -> str:
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
     return text.strip()
 
-def generate_from_llm(prompt: str) -> str:
+def generate_response(prompt: str) -> str:
     if model is None or not vocab:
-        return ""
+        return "Model is loading or not available."
     try:
-        tokens = [vocab.get(w, 1) for w in prompt.split()[:20]]
+        tokens = [vocab.get(w, 1) for w in prompt.split()[:25]]
         if not tokens:
             return ""
         input_tensor = torch.tensor([tokens], dtype=torch.long)
@@ -84,64 +80,25 @@ def generate_from_llm(prompt: str) -> str:
             generated_words = [inv_vocab.get(idx, "") for idx in predicted_ids if idx > 2]
             return clean_text(" ".join(generated_words))
     except Exception:
-        return ""
-
-def get_smart_tutor_response(query: str, lang: str = "bn") -> str:
-    msg_lower = query.lower().strip()
-
-    # Identity Check (Bangla, Banglish, English)
-    identity_triggers = ["tumi ke", "who are you", "what is your name", "tomar nam ki", "কে তুমি", "তোমার নাম কি"]
-    if any(w in msg_lower for w in identity_triggers):
-        if lang == "bn":
-            return "আমার নাম সাহায্য (Shahajjo AI)। আমি বাংলাদেশের একটি নিজস্ব কৃত্রিম বুদ্ধিমত্তা সহকারী, যা বাংলা, বাংলিশ ও ইংরেজি ভাষায় প্রশ্নের উত্তর দিতে তৈরি।"
-        elif lang == "banglish":
-            return "Amar nam Shahajjo AI. Ami Bangladesher ekta nijshwo AI assistant!"
-        else:
-            return "My name is Shahajjo AI, an indigenous AI assistant built for Bangladesh."
-
-    # 1. Custom PyTorch LLM (Nij theke uttor dibe)
-    if model is not None:
-        llm_res = generate_from_llm(query)
-        if llm_res and len(llm_res) > 3:
-            return llm_res
-
-    # 2. DuckDuckGo Realtime Search Fallback
-    try:
-        with DDGS() as ddgs:
-            results = [r for r in ddgs.text(query, max_results=3)]
-            if results:
-                bodies = [r.get('body', '') for r in results]
-                combined = " ".join(bodies)
-                if combined:
-                    return f"📚 **Tutor Note:**\n\n{clean_text(combined[:400])}..."
-    except Exception:
-        pass
-
-    # 3. Web Synthesis Fallback
-    try:
-        sys_prompt = "You are 'Shahajjo AI', a smart educational tutor for Bangladesh."
-        api_url = "https://text.pollinations.ai/" + urllib.parse.quote(f"{sys_prompt}\nQuery: {query}\nAnswer:")
-        res = requests.get(api_url, timeout=6)
-        if res.status_code == 200 and res.text.strip():
-            return clean_text(res.text.strip())
-    except Exception:
-        pass
-
-    return "আমি সাহায্য এআই। আপনার প্রশ্নের উত্তর প্রক্রিয়া করা হচ্ছে।"
+        return "Error during text generation."
 
 @app.get("/")
 def root():
-    return {"status": "online", "service": "Shahajjo AI Light API Engine"}
+    return {"status": "online", "model": "Shahajjo Pure LLM API"}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
     user_msg = (req.message or "").strip()
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
-    reply = get_smart_tutor_response(user_msg, req.lang or "bn")
+    
+    reply = generate_response(user_msg)
+    if not reply or len(reply) < 2:
+        reply = "Ami Shahajjo AI. Apnar kotha bujhchi."
+        
     return {"response": reply}
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
