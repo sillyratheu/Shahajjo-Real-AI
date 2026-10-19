@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from huggingface_hub import hf_hub_download
-import re
 
 app = FastAPI(title="Shahajjo Native Neural Engine")
 
@@ -23,7 +22,7 @@ app.add_middleware(
 REPO_ID = "Vidclip/Shahajjo"
 
 class ShahajjoTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6):
+    def __init__(self, vocab_size, d_model=256, nhead=4, num_layers=4):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
@@ -36,23 +35,31 @@ class ShahajjoTransformer(nn.Module):
         return self.fc_out(out)
 
 model = None
-vocab = {}
-inv_vocab = {}
+stoi = {}
+itos = {}
 
 try:
     torch.set_num_threads(1)
     model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
     vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
+    config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
 
     with open(vocab_path, "r", encoding="utf-8") as f:
-        vocab = json.load(f)
-    
-    inv_vocab = {}
-    for k, v in vocab.items():
-        inv_vocab[int(v)] = k
-        inv_vocab[str(v)] = k
+        vocab_data = json.load(f)
+        stoi = vocab_data.get("stoi", {})
+        # JSON keys are always strings, map them back to integer keys for itos
+        raw_itos = vocab_data.get("itos", {})
+        itos = {int(k): v for k, v in raw_itos.items()}
 
-    model = ShahajjoTransformer(vocab_size=len(vocab))
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    d_model = config.get("d_model", 256)
+    nhead = config.get("nhead", 4)
+    num_layers = config.get("num_layers", 4)
+    vocab_size = config.get("vocab_size", len(stoi))
+
+    model = ShahajjoTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
     print("Shahajjo Native LLM Engine loaded successfully!")
@@ -63,52 +70,61 @@ class ChatRequest(BaseModel):
     message: str
     lang: Optional[str] = "bn"
 
-def generate_from_llm(prompt: str) -> str:
-    if model is None or not vocab:
-        return "[Error: Model weights not loaded]"
-    try:
-        words = prompt.split()
-        input_tokens = [vocab.get(w, vocab.get("<unk>", 1)) for w in words]
-        
-        if not input_tokens:
-            input_tokens = [2]  # <sos> token
+def encode(s: str):
+    return [stoi.get(c, 0) for c in s]
 
-        current_tensor = torch.tensor([input_tokens], dtype=torch.long)
+def decode(indices):
+    return "".join([itos.get(i, "") for i in indices])
+
+def generate_from_llm(prompt: str) -> str:
+    if model is None or not stoi or not itos:
+        return "[Error: Model weights or Vocabulary not loaded]"
+    try:
+        # User Prompt-কে সঠিক চ্যাট ফরম্যাটে নেওয়া
+        formatted_prompt = f"User: {prompt} Shahajjo:"
+        input_ids = encode(formatted_prompt)
+
+        if not input_ids:
+            return "আমি সাহায্য এআই, আপনাকে সাহায্য করতে প্রস্তুত।"
+
+        current_tensor = torch.tensor([input_ids], dtype=torch.long)
         generated_ids = []
 
-        temperature = 0.7  # Controls creativity and natural flow
+        temperature = 0.7  # Creativity scale
+        max_length = 60    # Maximum characters to generate
 
         with torch.no_grad():
-            for _ in range(25):
+            for _ in range(max_length):
                 outputs = model(current_tensor)
                 next_token_logits = outputs[0, -1, :] / temperature
-                
-                # Anti-repetition penalty to stop looping words
-                for prev_id in generated_ids:
-                    next_token_logits[prev_id] -= 5.0
+
+                # Anti-repetition penalty (থামানো বা লুপ ভাঙার জন্য)
+                for prev_id in generated_ids[-10:]:  # Last 10 tokens check
+                    next_token_logits[prev_id] -= 3.0
 
                 probs = F.softmax(next_token_logits, dim=-1)
                 next_token_id = torch.multinomial(probs, num_samples=1).item()
-                
-                if next_token_id == 3:  # <eos> token
+
+                # 'newline' বা ইউজার টোকেন প্রম্পট এলে থামানো
+                char_gen = itos.get(next_token_id, "")
+                if char_gen == "\n" or "User:" in decode(generated_ids):
                     break
 
                 generated_ids.append(next_token_id)
                 next_token_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
                 current_tensor = torch.cat([current_tensor, next_token_tensor], dim=1)
 
-        decoded_words = []
-        for idx in generated_ids:
-            word = inv_vocab.get(idx, inv_vocab.get(str(idx), ""))
-            if word and word not in ["User:", "Shahajjo:"]:
-                decoded_words.append(word)
+        raw_output = decode(generated_ids).strip()
+        
+        # 'User:' শব্দ ফিল্টার আউট করা
+        if "User:" in raw_output:
+            raw_output = raw_output.split("User:")[0].strip()
 
-        raw_output = " ".join(decoded_words).strip()
         if raw_output:
             return raw_output
-        
-        return "Ami Shahajjo AI, apnake sahajjo korar jonno prastut achi."
-        
+
+        return "আমি সাহায্য এআই, আপনাকে সাহায্য করতে প্রস্তুত।"
+
     except Exception as e:
         return f"[Model Inference Error: {str(e)}]"
 
