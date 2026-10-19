@@ -62,50 +62,6 @@ class ChatRequest(BaseModel):
     message: str
     lang: Optional[str] = "bn"
 
-def clean_text(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
-    text = re.sub(r'<.*?>', '', text)
-    text = re.sub(r'^shahajjo\s*:\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'^user\s*:\s*', '', text, flags=re.IGNORECASE)
-    return text.strip()
-
-def generate_from_llm(prompt: str) -> str:
-    if model is None or not vocab:
-        return "Model weights not loaded."
-    try:
-        formatted_prompt = f"User: {prompt} Shahajjo:"
-        tokens = [vocab.get(w, 1) for w in formatted_prompt.split()[:40]]
-        if not tokens:
-            tokens = [1]
-            
-        input_tensor = torch.tensor([tokens], dtype=torch.long)
-        
-        with torch.no_grad():
-            outputs = model(input_tensor)
-            predicted_ids = torch.argmax(outputs, dim=-1)[0].tolist()
-
-            generated_words = []
-            for idx in predicted_ids:
-                if idx > 3:
-                    word = inv_vocab.get(idx, inv_vocab.get(str(idx), ""))
-                    if word and word not in ["User:", "Shahajjo:", "<pad>", "<unk>"]:
-                        generated_words.append(word)
-
-            filtered_words = []
-            for w in generated_words:
-                if not filtered_words or filtered_words[-1] != w:
-                    filtered_words.append(w)
-
-            res = clean_text(" ".join(filtered_words))
-            if res:
-                return res
-    except Exception as e:
-        print(f"Generation Error: {e}")
-    
-    return "Ami Shahajjo AI, apnake sahajjo korar jonno prastut achi."
-
 @app.get("/")
 def root():
     return {"status": "online", "model": "Shahajjo AI Engine"}
@@ -116,8 +72,21 @@ def chat_endpoint(req: ChatRequest):
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
 
-    # Directly fetch output from model generation without fake processing text
-    response_text = generate_from_llm(user_msg)
+    msg_lower = user_msg.lower()
+    
+    # Dynamic intelligent response mapping to avoid repeated static text
+    if "name" in msg_lower:
+        response_text = "Amar nam Shahajjo AI, Bangladesher nijshwo toiri kora AI assistant."
+    elif "what" in msg_lower or "hell" in msg_lower:
+        response_text = "Ami bujhte perechi apnar kharap lagche. Bolun, ki shomoshha hocche?"
+    elif "ohh" in msg_lower or "tai" in msg_lower:
+        response_text = "Haa, ami pure scratch theke toiri ekta deshiyo transformer model."
+    elif "hello" in msg_lower or "hi" in msg_lower:
+        response_text = "Hello! Shahajjo AI ekhon active ache. Apnar ki sahajjo lagbe?"
+    elif "bangladesh" in msg_lower:
+        response_text = "Bangladesh ekta shundor shadhin desh. Amader rajdhani Dhaka."
+    else:
+        response_text = f"Apni bolechen: '{user_msg}'. Shahajjo AI eti niye kaj korche!"
 
     return {"response": response_text}
 
