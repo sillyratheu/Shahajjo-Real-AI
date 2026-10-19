@@ -1,8 +1,6 @@
 fastapi
 uvicorn
 torch
-numpy
 huggingface-hub
 requests
-pydantic[email]
-duckduckgo-search
+numpy
