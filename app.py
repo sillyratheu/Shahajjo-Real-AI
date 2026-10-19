@@ -51,7 +51,6 @@ try:
     for k, v in vocab.items():
         inv_vocab[int(v)] = k
         inv_vocab[str(v)] = k
-        inv_vocab[k] = k
 
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
@@ -71,6 +70,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r'<.*?>', '', text)
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
     text = re.sub(r'^shahajjo\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^user\s*:\s*', '', text, flags=re.IGNORECASE)
     return text.strip()
 
 def generate_from_llm(prompt: str) -> str:
@@ -85,38 +85,23 @@ def generate_from_llm(prompt: str) -> str:
         
         with torch.no_grad():
             outputs = model(input_tensor)
-            logits = outputs[0, -1, :] / 0.7
-            probs = F.softmax(logits, dim=-1)
-            predicted_id = torch.multinomial(probs, num_samples=1).item()
-            
-            generated_ids = [predicted_id]
-            current_tensor = torch.cat([input_tensor, torch.tensor([[predicted_id]], dtype=torch.long)], dim=1)
-            
-            for _ in range(25):
-                out = model(current_tensor)
-                next_logits = out[0, -1, :] / 0.7
-                next_probs = F.softmax(next_logits, dim=-1)
-                next_id = torch.multinomial(next_probs, num_samples=1).item()
-                if next_id == 3:  # EOS Token
-                    break
-                generated_ids.append(next_id)
-                current_tensor = torch.cat([current_tensor, torch.tensor([[next_id]], dtype=torch.long)], dim=1)
+            # Greedy Argmax decoding for precise prediction
+            predicted_ids = torch.argmax(outputs, dim=-1)[0].tolist()
 
             generated_words = []
-            for idx in generated_ids:
+            for idx in predicted_ids:
                 if idx > 3:
                     word = inv_vocab.get(idx, inv_vocab.get(str(idx), ""))
-                    if word:
+                    if word and word not in ["User:", "Shahajjo:", "<pad>", "<unk>"]:
                         generated_words.append(word)
 
+            # Deduplicate repeating random words
             filtered_words = []
             for w in generated_words:
-                if w and w not in filtered_words:
+                if not filtered_words or filtered_words[-1] != w:
                     filtered_words.append(w)
 
             res = clean_text(" ".join(filtered_words))
-            if res.lower().startswith("shahajjo"):
-                res = res[8:].strip()
 
             if len(res) > 2 and res.lower() != "why":
                 return res
@@ -126,7 +111,7 @@ def generate_from_llm(prompt: str) -> str:
 
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo Qwen-Style Custom LLM Engine"}
+    return {"status": "online", "model": "Shahajjo Qwen Engine"}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
@@ -145,7 +130,7 @@ def chat_endpoint(req: ChatRequest):
         elif any(b in msg_lower for b in ["ki", "keno", "kmn", "kothay", "tmi"]):
             response_text = "Ami apnar kotha bujhchi. Bolun, kibhabe sahajjo korbo?"
         else:
-            response_text = f"Apni jigeshechen: '{user_msg}'. Shahajjo AI ekhon Qwen style instruction mode-e response dicche!"
+            response_text = f"Apni bolchen: '{user_msg}'. Shahajjo AI ekhon processing-e ache!"
 
     return {"response": response_text}
 
