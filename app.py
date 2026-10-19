@@ -9,7 +9,7 @@ from typing import Optional
 from huggingface_hub import hf_hub_download
 import re
 
-app = FastAPI(title="Shahajjo AI Engine")
+app = FastAPI(title="Shahajjo AI Native LLM Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,7 +54,7 @@ try:
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    print("Shahajjo AI Engine loaded successfully!")
+    print("Shahajjo Native LLM Engine loaded successfully!")
 except Exception as e:
     print(f"Model Loading Error: {e}")
 
@@ -62,9 +62,60 @@ class ChatRequest(BaseModel):
     message: str
     lang: Optional[str] = "bn"
 
+def clean_text(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
+    text = re.sub(r'<.*?>', '', text)
+    text = re.sub(r'^user\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'^shahajjo\s*:\s*', '', text, flags=re.IGNORECASE)
+    return text.strip()
+
+# Pure Neural Autoregressive Generation from Model Weights
+def generate_from_llm(prompt: str) -> str:
+    if model is None or not vocab:
+        return "Model weights not loaded yet."
+    try:
+        formatted_prompt = f"User: {prompt} Shahajjo:"
+        input_tokens = [vocab.get(w, 1) for w in formatted_prompt.split() if w in vocab]
+        
+        if not input_tokens:
+            input_tokens = [2]  # <sos> token
+
+        current_tensor = torch.tensor([input_tokens], dtype=torch.long)
+        generated_ids = []
+
+        with torch.no_grad():
+            for _ in range(25):
+                outputs = model(current_tensor)
+                next_token_logits = outputs[0, -1, :]
+                next_token_id = torch.argmax(next_token_logits).item()
+                
+                if next_token_id == 3:  # <eos> token
+                    break
+
+                generated_ids.append(next_token_id)
+                next_token_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
+                current_tensor = torch.cat([current_tensor, next_token_tensor], dim=1)
+
+        generated_words = []
+        for idx in generated_ids:
+            if idx > 3:
+                word = inv_vocab.get(idx, inv_vocab.get(str(idx), ""))
+                if word and word not in ["User:", "Shahajjo:"]:
+                    generated_words.append(word)
+
+        res = clean_text(" ".join(generated_words))
+        if res:
+            return res
+    except Exception as e:
+        print(f"Neural Generation Error: {e}")
+        
+    return "Ami Shahajjo AI, apnake sahajjo korar jonno prastut achi."
+
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo AI Engine"}
+    return {"status": "online", "model": "Shahajjo Native Neural Engine"}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
@@ -72,22 +123,7 @@ def chat_endpoint(req: ChatRequest):
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
 
-    msg_lower = user_msg.lower()
-    
-    # Dynamic intelligent response mapping to avoid repeated static text
-    if "name" in msg_lower:
-        response_text = "Amar nam Shahajjo AI, Bangladesher nijshwo toiri kora AI assistant."
-    elif "what" in msg_lower or "hell" in msg_lower:
-        response_text = "Ami bujhte perechi apnar kharap lagche. Bolun, ki shomoshha hocche?"
-    elif "ohh" in msg_lower or "tai" in msg_lower:
-        response_text = "Haa, ami pure scratch theke toiri ekta deshiyo transformer model."
-    elif "hello" in msg_lower or "hi" in msg_lower:
-        response_text = "Hello! Shahajjo AI ekhon active ache. Apnar ki sahajjo lagbe?"
-    elif "bangladesh" in msg_lower:
-        response_text = "Bangladesh ekta shundor shadhin desh. Amader rajdhani Dhaka."
-    else:
-        response_text = f"Apni bolechen: '{user_msg}'. Shahajjo AI eti niye kaj korche!"
-
+    response_text = generate_from_llm(user_msg)
     return {"response": response_text}
 
 if __name__ == "__main__":
