@@ -69,7 +69,6 @@ def clean_text(text: str) -> str:
     text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
     text = re.sub(r'<.*?>', '', text)
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
-    # Automatically remove 'Shahajjo:' or leading tags
     text = re.sub(r'^shahajjo\s*:\s*', '', text, flags=re.IGNORECASE)
     return text.strip()
 
@@ -122,14 +121,15 @@ def chat_endpoint(req: ChatRequest):
 
     if not response_text or len(response_text) < 2 or response_text.lower() == "why":
         msg_lower = user_msg.lower()
-        is_english = all(ord(c) < 128 for c in user_msg if c.isalpha())
-
-        if is_english or "hello" in msg_lower or "hi" in msg_lower:
-            response_text = "Hello! I am Shahajjo AI, built for Bangladesh. How can I help you?"
-        elif any(b in msg_lower for b in ["ki", "keno", "kmn", "aschhi", "korbo", "tmi", "amar", "nam"]):
-            response_text = "Ami Shahajjo AI, Bangladesher nijshwo AI assistant. Apnar kotha bujhchi, bolun ki korte hobe."
+        
+        if "hello" in msg_lower or "hi" in msg_lower:
+            response_text = "Hello! Shahajjo AI ready ache. Ki sahajjo lagbe?"
+        elif "bangladesh" in msg_lower:
+            response_text = "Bangladesh ekta shundor shadhin desh. Amader rajdhani Dhaka."
+        elif any(b in msg_lower for b in ["ki", "keno", "kmn", "kothay", "tmi"]):
+            response_text = "Ami apnar kotha sunte pacchi. Bolun, kibhabe sahajjo korbo?"
         else:
-            response_text = "আমি সাহায্য এআই। বাংলাদেশের তৈরি নিজস্ব কৃত্রিম বুদ্ধিমত্তা সহকারী। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?"
+            response_text = f"Apni bolchen: '{user_msg}'. Shahajjo AI ekhon learning phase e ache!"
 
     return {"response": response_text}
 
