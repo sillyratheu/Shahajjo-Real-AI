@@ -78,9 +78,19 @@ def generate_from_llm(prompt: str) -> str:
             outputs = model(input_tensor)
             predicted_ids = torch.argmax(outputs, dim=-1)[0].tolist()
             generated_words = [inv_vocab.get(idx, "") for idx in predicted_ids if idx > 2]
-            return clean_text(" ".join(generated_words))
+            
+            # Prevent single word repetition loops like "Why why why"
+            filtered_words = []
+            for w in generated_words:
+                if w and w not in filtered_words:
+                    filtered_words.append(w)
+            
+            res = clean_text(" ".join(filtered_words))
+            if len(res) > 2 and res.lower() != "why":
+                return res
     except Exception:
-        return ""
+        pass
+    return ""
 
 @app.get("/")
 def root():
@@ -94,20 +104,20 @@ def chat_endpoint(req: ChatRequest):
 
     response_text = generate_from_llm(user_msg)
     
-    if not response_text or len(response_text) < 2:
+    if not response_text or len(response_text) < 2 or response_text.lower() == "why":
         msg_lower = user_msg.lower()
         is_english = all(ord(c) < 128 for c in user_msg if c.isalpha())
         
-        if is_english:
-            response_text = "Hello! I am Shahajjo AI. How can I help you?"
-        elif any(b in msg_lower for b in ["ki", "keno", "kmn", "aschhi", "korbo", "tmi", "amar"]):
-            response_text = "Ami Shahajjo AI. Apnar kotha bujhchi, bolun ki korte hobe."
+        if is_english or "hello" in msg_lower or "hi" in msg_lower:
+            response_text = "Hello! I am Shahajjo AI, built for Bangladesh. How can I help you?"
+        elif any(b in msg_lower for b in ["ki", "keno", "kmn", "aschhi", "korbo", "tmi", "amar", "nam"]):
+            response_text = "Ami Shahajjo AI, Bangladesher nijshwo AI assistant. Apnar kotha bujhchi, bolun ki korte hobe."
         else:
-            response_text = "আমি সাহায্য এআই। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?"
+            response_text = "আমি সাহায্য এআই। বাংলাদেশের তৈরি নিজস্ব কৃত্রিম বুদ্ধিমত্তা সহকারী। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?"
 
     return {"response": response_text}
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port)
