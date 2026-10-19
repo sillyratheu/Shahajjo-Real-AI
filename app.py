@@ -9,7 +9,7 @@ from typing import Optional
 from huggingface_hub import hf_hub_download
 import re
 
-app = FastAPI(title="Shahajjo Pure LLM Engine")
+app = FastAPI(title="Shahajjo Custom LLM Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,7 +38,6 @@ model = None
 vocab = {}
 inv_vocab = {}
 
-# Load custom model safely on CPU
 try:
     torch.set_num_threads(1)
     model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
@@ -62,7 +61,7 @@ class ChatRequest(BaseModel):
 def clean_text(text: str) -> str:
     if not text:
         return ""
-    text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
+    text = re.sub(r'\{.*?\}', '', text, flags=root_flag := re.DOTALL)
     text = re.sub(r'<.*?>', '', text)
     text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
     return text.strip()
@@ -96,7 +95,16 @@ def chat_endpoint(req: ChatRequest):
     response_text = generate_from_llm(user_msg)
     
     if not response_text or len(response_text) < 2:
-        response_text = "আমি সাহায্য এআই। আপনার বার্তা বিশ্লেষণ করা হচ্ছে..."
+        # Detect language and fallback accordingly without any analysis text
+        msg_lower = user_msg.lower()
+        is_english = all(ord(c) < 128 for c in user_msg if c.isalpha())
+        
+        if is_english:
+            response_text = "Hello! I am Shahajjo AI. How can I help you?"
+        elif any(b in msg_lower for b in ["ki",",","keno","kmn","aschhi","korbo","tmi","amar"]):
+            response_text = "Ami Shahajjo AI. Apnar kotha bujhchi, bolun ki korte hobe."
+        else:
+            response_text = "আমি সাহায্য এআই। বলুন, আপনাকে কীভাবে সাহায্য করতে পারি?"
 
     return {"response": response_text}
 
