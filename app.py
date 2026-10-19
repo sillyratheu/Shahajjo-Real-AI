@@ -9,7 +9,7 @@ from typing import Optional
 from huggingface_hub import hf_hub_download
 import re
 
-app = FastAPI(title="Shahajjo AI Native LLM Engine")
+app = FastAPI(title="Shahajjo Native LLM Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,22 +62,14 @@ class ChatRequest(BaseModel):
     message: str
     lang: Optional[str] = "bn"
 
-def clean_text(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
-    text = re.sub(r'<.*?>', '', text)
-    text = re.sub(r'^user\s*:\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'^shahajjo\s*:\s*', '', text, flags=re.IGNORECASE)
-    return text.strip()
-
-# Pure Neural Autoregressive Generation from Model Weights
+# 🧠 100% Real Model Autoregressive Generator (No Fake Fallbacks)
 def generate_from_llm(prompt: str) -> str:
     if model is None or not vocab:
-        return "Model weights not loaded yet."
+        return "[Error: Model weights not loaded]"
     try:
-        formatted_prompt = f"User: {prompt} Shahajjo:"
-        input_tokens = [vocab.get(w, 1) for w in formatted_prompt.split() if w in vocab]
+        # Convert prompt words to token IDs safely
+        words = prompt.split()
+        input_tokens = [vocab.get(w, vocab.get("<unk>", 1)) for w in words]
         
         if not input_tokens:
             input_tokens = [2]  # <sos> token
@@ -86,7 +78,7 @@ def generate_from_llm(prompt: str) -> str:
         generated_ids = []
 
         with torch.no_grad():
-            for _ in range(25):
+            for _ in range(25):  # Loop to generate tokens step-by-step
                 outputs = model(current_tensor)
                 next_token_logits = outputs[0, -1, :]
                 next_token_id = torch.argmax(next_token_logits).item()
@@ -98,20 +90,20 @@ def generate_from_llm(prompt: str) -> str:
                 next_token_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
                 current_tensor = torch.cat([current_tensor, next_token_tensor], dim=1)
 
-        generated_words = []
+        # Decode token IDs back to words using inverse vocabulary
+        decoded_words = []
         for idx in generated_ids:
-            if idx > 3:
-                word = inv_vocab.get(idx, inv_vocab.get(str(idx), ""))
-                if word and word not in ["User:", "Shahajjo:"]:
-                    generated_words.append(word)
+            word = inv_vocab.get(idx, inv_vocab.get(str(idx), f"<{idx}>"))
+            decoded_words.append(word)
 
-        res = clean_text(" ".join(generated_words))
-        if res:
-            return res
-    except Exception as e:
-        print(f"Neural Generation Error: {e}")
+        raw_output = " ".join(decoded_words).strip()
+        if raw_output:
+            return f"{raw_output}"
         
-    return "Ami Shahajjo AI, apnake sahajjo korar jonno prastut achi."
+        return "[Model generated empty sequence]"
+        
+    except Exception as e:
+        return f"[Model Inference Error: {str(e)}]"
 
 @app.get("/")
 def root():
@@ -123,6 +115,7 @@ def chat_endpoint(req: ChatRequest):
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message is required")
 
+    # Direct call to pure neural generation
     response_text = generate_from_llm(user_msg)
     return {"response": response_text}
 
