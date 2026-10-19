@@ -10,7 +10,7 @@ from huggingface_hub import hf_hub_download
 import re
 import torch.nn.functional as F
 
-app = FastAPI(title="Shahajjo Qwen Engine")
+app = FastAPI(title="Shahajjo AI Custom Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,7 +55,7 @@ try:
     model = ShahajjoTransformer(vocab_size=len(vocab))
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    print("Shahajjo Qwen Engine loaded successfully!")
+    print("Shahajjo AI Engine loaded successfully!")
 except Exception as e:
     print(f"Model Loading Error: {e}")
 
@@ -68,7 +68,6 @@ def clean_text(text: str) -> str:
         return ""
     text = re.sub(r'\{.*?\}', '', text, flags=re.DOTALL)
     text = re.sub(r'<.*?>', '', text)
-    text = text.replace("reasoning:", "").replace("tool_calls:", "").replace("assistant", "")
     text = re.sub(r'^shahajjo\s*:\s*', '', text, flags=re.IGNORECASE)
     text = re.sub(r'^user\s*:\s*', '', text, flags=re.IGNORECASE)
     return text.strip()
@@ -85,7 +84,6 @@ def generate_from_llm(prompt: str) -> str:
         
         with torch.no_grad():
             outputs = model(input_tensor)
-            # Greedy Argmax decoding for precise prediction
             predicted_ids = torch.argmax(outputs, dim=-1)[0].tolist()
 
             generated_words = []
@@ -95,23 +93,20 @@ def generate_from_llm(prompt: str) -> str:
                     if word and word not in ["User:", "Shahajjo:", "<pad>", "<unk>"]:
                         generated_words.append(word)
 
-            # Deduplicate repeating random words
             filtered_words = []
             for w in generated_words:
                 if not filtered_words or filtered_words[-1] != w:
                     filtered_words.append(w)
 
             res = clean_text(" ".join(filtered_words))
-
-            if len(res) > 2 and res.lower() != "why":
-                return res
+            return res
     except Exception as e:
         print(f"Generation Error: {e}")
     return ""
 
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo Qwen Engine"}
+    return {"status": "online", "model": "Shahajjo AI Engine"}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
@@ -120,17 +115,22 @@ def chat_endpoint(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Message is required")
 
     response_text = generate_from_llm(user_msg)
+    msg_lower = user_msg.lower()
 
+    # Dynamic Intent Matcher
     if not response_text or len(response_text) < 2 or response_text.lower() == "why":
-        msg_lower = user_msg.lower()
-        if "hello" in msg_lower or "hi" in msg_lower:
-            response_text = "Hello! I am Shahajjo AI, built for Bangladesh. How can I help you?"
-        elif "bangladesh" in msg_lower:
-            response_text = "Bangladesh ekta shundor shadhin desh jar rajdhani Dhaka."
-        elif any(b in msg_lower for b in ["ki", "keno", "kmn", "kothay", "tmi"]):
-            response_text = "Ami apnar kotha bujhchi. Bolun, kibhabe sahajjo korbo?"
+        if msg_lower in ["hi", "hello", "hey"]:
+            response_text = "Hello! Ami Shahajjo AI. Apnake kibhabe sahajjo korte pari?"
+        elif msg_lower in ["ki", "ki khobor"]:
+            response_text = "Ami valo achi! Apnar ki dhoroner sahajjo lagbe?"
+        elif msg_lower in ["keno", "why"]:
+            response_text = "Apni ki bishoye janote chan? Sothik bhabe bolun, ami Uttar dicchi."
+        elif "tmi" in msg_lower or "tumi" in msg_lower:
+            response_text = "Ami Shahajjo AI, Bangladesher custom transformer LLM assistant."
+        elif "ami" in msg_lower:
+            response_text = "Apni Shahajjo AI-er sathe kotha bolchen. Ki lagbe bolun?"
         else:
-            response_text = f"Apni bolchen: '{user_msg}'. Shahajjo AI ekhon processing-e ache!"
+            response_text = f"Shahajjo AI response: '{user_msg}' niye processing-e ache."
 
     return {"response": response_text}
 
