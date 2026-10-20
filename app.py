@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,6 +44,10 @@ SOS_IDX = 2
 EOS_IDX = 3
 load_error_msg = ""
 
+# Word Tokenizer Pattern (Regex based for Bangla & English words)
+def word_tokenize(text: str):
+    return re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
+
 def load_shahajjo_model():
     global model, stoi, itos, PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX, load_error_msg
     try:
@@ -59,13 +64,11 @@ def load_shahajjo_model():
                 stoi = vocab_data
                 itos = {int(v): k for k, v in vocab_data.items()}
 
-        # Special token index mapping
         PAD_IDX = stoi.get("<pad>", 0)
         UNK_IDX = stoi.get("<unk>", 1)
         SOS_IDX = stoi.get("<sos>", 2)
         EOS_IDX = stoi.get("<eos>", 3)
 
-        # Default config matching training setup
         d_model, nhead, num_layers = 512, 8, 6
         try:
             config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
@@ -79,7 +82,7 @@ def load_shahajjo_model():
 
         vocab_size = len(stoi)
         if vocab_size == 0:
-            vocab_size = 100
+            vocab_size = 1000
 
         model = ShahajjoTransformer(
             vocab_size=vocab_size, 
@@ -88,27 +91,27 @@ def load_shahajjo_model():
             num_layers=num_layers, 
             pad_idx=PAD_IDX
         )
-        
-        # Load weights safely on CPU
+
         state_dict = torch.load(model_path, map_location=torch.device('cpu'))
         model.load_state_dict(state_dict)
         model.eval()
-        
+
         load_error_msg = ""
-        print("🎉 Shahajjo Native LLM Engine loaded successfully with clean architecture!")
+        print("🎉 Shahajjo Word-Level Engine Loaded Successfully!")
     except Exception as e:
         load_error_msg = str(e)
         print(f"❌ Model Loading Error: {e}")
 
-# Initial model load attempt
 load_shahajjo_model()
 
 class ChatRequest(BaseModel):
     message: str
     lang: Optional[str] = "bn"
 
+# ✅ Fixed Word-Level Encoder
 def encode(s: str):
-    return [stoi.get(c, UNK_IDX) for c in s]
+    tokens = word_tokenize(s)
+    return [stoi.get(t, UNK_IDX) for t in tokens]
 
 def generate_from_llm(prompt: str) -> str:
     global model, stoi, itos
@@ -127,10 +130,10 @@ def generate_from_llm(prompt: str) -> str:
             return "নমস্কার! আমি সাহায্য এআই।"
 
         current_tensor = torch.tensor([input_ids], dtype=torch.long)
-        generated_ids = []
+        generated_words = []
 
-        temperature = 0.6
-        max_length = 70
+        temperature = 0.5
+        max_length = 40  # Speed optimization for faster responses
 
         with torch.no_grad():
             for _ in range(max_length):
@@ -138,9 +141,9 @@ def generate_from_llm(prompt: str) -> str:
                 next_token_logits = outputs[0, -1, :] / temperature
 
                 # Anti-repetition penalty
-                for prev_id in generated_ids[-6:]:
+                for prev_id in generated_words[-5:]:
                     if prev_id < next_token_logits.size(0):
-                        next_token_logits[prev_id] -= 4.0
+                        next_token_logits[prev_id] -= 3.5
 
                 probs = F.softmax(next_token_logits, dim=-1)
                 next_token_id = torch.multinomial(probs, num_samples=1).item()
@@ -148,20 +151,27 @@ def generate_from_llm(prompt: str) -> str:
                 if next_token_id == EOS_IDX:
                     break
 
-                generated_ids.append(next_token_id)
+                generated_words.append(next_token_id)
                 next_token_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
                 current_tensor = torch.cat([current_tensor, next_token_tensor], dim=1)
 
-        # Clean filtering to strip out special tokens from string output
-        clean_chars = []
-        for idx in generated_ids:
-            char_gen = itos.get(idx, "")
-            if char_gen not in ["<pad>", "<unk>", "<sos>", "<eos>"]:
-                clean_chars.append(char_gen)
+        # Filter out special tokens
+        clean_tokens = []
+        for idx in generated_words:
+            word_str = itos.get(idx, "")
+            if word_str not in ["<pad>", "<unk>", "<sos>", "<eos>"]:
+                clean_tokens.append(word_str)
 
-        raw_output = "".join(clean_chars).strip()
+        # ✅ FIXED: Reconstruct response with proper word spacing and punctuation formatting
+        response_text = ""
+        for token in clean_tokens:
+            if token in [".", ",", "!", "?", "।"]:
+                response_text = response_text.strip() + token + " "
+            else:
+                response_text += token + " "
 
-        # Clean unwanted extra prompt echoes
+        raw_output = response_text.strip()
+
         if "User:" in raw_output:
             raw_output = raw_output.split("User:")[0].strip()
         if "Shahajjo:" in raw_output:
@@ -177,7 +187,7 @@ def generate_from_llm(prompt: str) -> str:
 
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo Native Neural Engine", "loaded": model is not None}
+    return {"status": "online", "model": "Shahajjo Word-Level Engine", "loaded": model is not None}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
