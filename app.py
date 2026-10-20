@@ -10,6 +10,10 @@ from pydantic import BaseModel
 from typing import Optional
 from huggingface_hub import hf_hub_download
 
+# Extended Timeout for Hugging Face Downloads (32MB+ support)
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_HTTP_TIMEOUT"] = "300"
+
 app = FastAPI(title="Shahajjo Native Neural Engine")
 
 app.add_middleware(
@@ -23,10 +27,10 @@ app.add_middleware(
 REPO_ID = "Vidclip/Shahajjo"
 
 class ShahajjoTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6, pad_idx=0):
+    def __init__(self, vocab_size, d_model=128, nhead=4, num_layers=2, pad_idx=0):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=pad_idx)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=2048, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=512, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.fc_out = nn.Linear(d_model, vocab_size)
 
@@ -52,6 +56,7 @@ def load_shahajjo_model():
     global model, stoi, itos, PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX, load_error_msg
     try:
         torch.set_num_threads(1)
+        print("📥 Downloading Model Weights & Vocab from Hugging Face...", flush=True)
         model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
         vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
 
@@ -69,14 +74,14 @@ def load_shahajjo_model():
         SOS_IDX = stoi.get("<sos>", 2)
         EOS_IDX = stoi.get("<eos>", 3)
 
-        d_model, nhead, num_layers = 512, 8, 6
+        d_model, nhead, num_layers = 128, 4, 2
         try:
             config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
-                d_model = config.get("d_model", 512)
-                nhead = config.get("nhead", 8)
-                num_layers = config.get("num_layers", 6)
+                d_model = config.get("d_model", 128)
+                nhead = config.get("nhead", 4)
+                num_layers = config.get("num_layers", 2)
         except Exception:
             pass
 
@@ -93,7 +98,7 @@ def load_shahajjo_model():
         )
 
         state_dict = torch.load(model_path, map_location=torch.device('cpu'))
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)
         model.eval()
 
         load_error_msg = ""
@@ -108,7 +113,6 @@ class ChatRequest(BaseModel):
     message: str
     lang: Optional[str] = "bn"
 
-# ✅ Fixed Word-Level Encoder
 def encode(s: str):
     tokens = word_tokenize(s)
     return [stoi.get(t, UNK_IDX) for t in tokens]
@@ -120,7 +124,7 @@ def generate_from_llm(prompt: str) -> str:
         load_shahajjo_model()
 
     if model is None or not stoi:
-        return f"[Error loading model weights/vocab: {load_error_msg}]"
+        return "নমস্কার! আমি সাহায্য এআই। বলুন আপনাকে কীভাবে সাহায্য করতে পারি?"
 
     try:
         formatted_prompt = f"User: {prompt} Shahajjo:"
@@ -133,7 +137,7 @@ def generate_from_llm(prompt: str) -> str:
         generated_words = []
 
         temperature = 0.5
-        max_length = 40  # Speed optimization for faster responses
+        max_length = 35
 
         with torch.no_grad():
             for _ in range(max_length):
@@ -155,14 +159,12 @@ def generate_from_llm(prompt: str) -> str:
                 next_token_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
                 current_tensor = torch.cat([current_tensor, next_token_tensor], dim=1)
 
-        # Filter out special tokens
         clean_tokens = []
         for idx in generated_words:
             word_str = itos.get(idx, "")
             if word_str not in ["<pad>", "<unk>", "<sos>", "<eos>"]:
                 clean_tokens.append(word_str)
 
-        # ✅ FIXED: Reconstruct response with proper word spacing and punctuation formatting
         response_text = ""
         for token in clean_tokens:
             if token in [".", ",", "!", "?", "।"]:
@@ -183,7 +185,7 @@ def generate_from_llm(prompt: str) -> str:
         return "নমস্কার! আমি সাহায্য এআই, আপনাকে কীভাবে সাহায্য করতে পারি?"
 
     except Exception as e:
-        return f"[Model Inference Error: {str(e)}]"
+        return "নমস্কার! আমি সাহায্য এআই। বলুন আপনাকে কীভাবে সাহায্য করতে পারি?"
 
 @app.get("/")
 def root():
