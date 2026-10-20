@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from typing import Optional
 from huggingface_hub import hf_hub_download
 
-# Extended Timeout for Hugging Face Downloads (32MB+ support)
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_HTTP_TIMEOUT"] = "300"
 
@@ -48,7 +47,6 @@ SOS_IDX = 2
 EOS_IDX = 3
 load_error_msg = ""
 
-# Word Tokenizer Pattern (Regex based for Bangla & English words)
 def word_tokenize(text: str):
     return re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
 
@@ -74,7 +72,6 @@ def load_shahajjo_model():
         SOS_IDX = stoi.get("<sos>", 2)
         EOS_IDX = stoi.get("<eos>", 3)
 
-        # MASSIVE DEFAULTS (512, 8, 6)
         d_model, nhead, num_layers = 512, 8, 6
         try:
             config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
@@ -103,7 +100,7 @@ def load_shahajjo_model():
         model.eval()
 
         load_error_msg = ""
-        print("🎉 Shahajjo Massive Word-Level Engine Loaded Successfully!")
+        print("🎉 Shahajjo Engine Loaded Successfully!")
     except Exception as e:
         load_error_msg = str(e)
         print(f"❌ Model Loading Error: {e}")
@@ -125,25 +122,26 @@ def generate_from_llm(prompt: str) -> str:
         load_shahajjo_model()
 
     if model is None or not stoi:
-        return "নমস্কার! আমি সাহায্য এআই। বলুন আপনাকে কীভাবে সাহায্য করতে পারি?"
+        return f"[Model Error: {load_error_msg}]"
 
     try:
         formatted_prompt = f"User: {prompt} Shahajjo:"
         input_ids = [SOS_IDX] + encode(formatted_prompt)
 
-        if not input_ids:
-            return "নমস্কার! আমি সাহায্য এআই।"
-
         current_tensor = torch.tensor([input_ids], dtype=torch.long)
         generated_words = []
 
-        temperature = 0.4  # Slightly lowered for cleaner stability
+        temperature = 0.6
         max_length = 35
 
         with torch.no_grad():
-            for _ in range(max_length):
+            for step in range(max_length):
                 outputs = model(current_tensor)
                 next_token_logits = outputs[0, -1, :] / temperature
+
+                # Prevent immediate EOS in early tokens
+                if step < 2:
+                    next_token_logits[EOS_IDX] = -1e9
 
                 # Anti-repetition penalty
                 for prev_id in generated_words[-5:]:
@@ -175,22 +173,17 @@ def generate_from_llm(prompt: str) -> str:
 
         raw_output = response_text.strip()
 
-        if "User:" in raw_output:
-            raw_output = raw_output.split("User:")[0].strip()
-        if "Shahajjo:" in raw_output:
-            raw_output = raw_output.split("Shahajjo:")[-1].strip()
-
-        if raw_output and len(raw_output) > 1:
+        if raw_output:
             return raw_output
 
-        return "নমস্কার! আমি সাহায্য এআই, আপনাকে কীভাবে সাহায্য করতে পারি?"
+        return "নমস্কার! আমি সাহায্য এআই।"
 
     except Exception as e:
-        return "নমস্কার! আমি সাহায্য এআই। বলুন আপনাকে কীভাবে সাহায্য করতে পারি?"
+        return f"[Inference Error: {str(e)}]"
 
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo Massive Word-Level Engine", "loaded": model is not None}
+    return {"status": "online", "model": "Shahajjo Native Engine", "loaded": model is not None}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
