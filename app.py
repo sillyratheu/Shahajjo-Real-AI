@@ -27,10 +27,10 @@ app.add_middleware(
 REPO_ID = "Vidclip/Shahajjo"
 
 class ShahajjoTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model=128, nhead=4, num_layers=2, pad_idx=0):
+    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6, pad_idx=0):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=pad_idx)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=512, batch_first=True)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=2048, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.fc_out = nn.Linear(d_model, vocab_size)
 
@@ -74,14 +74,15 @@ def load_shahajjo_model():
         SOS_IDX = stoi.get("<sos>", 2)
         EOS_IDX = stoi.get("<eos>", 3)
 
-        d_model, nhead, num_layers = 128, 4, 2
+        # MASSIVE DEFAULTS (512, 8, 6)
+        d_model, nhead, num_layers = 512, 8, 6
         try:
             config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
-                d_model = config.get("d_model", 128)
-                nhead = config.get("nhead", 4)
-                num_layers = config.get("num_layers", 2)
+                d_model = config.get("d_model", 512)
+                nhead = config.get("nhead", 8)
+                num_layers = config.get("num_layers", 6)
         except Exception:
             pass
 
@@ -102,7 +103,7 @@ def load_shahajjo_model():
         model.eval()
 
         load_error_msg = ""
-        print("🎉 Shahajjo Word-Level Engine Loaded Successfully!")
+        print("🎉 Shahajjo Massive Word-Level Engine Loaded Successfully!")
     except Exception as e:
         load_error_msg = str(e)
         print(f"❌ Model Loading Error: {e}")
@@ -136,7 +137,7 @@ def generate_from_llm(prompt: str) -> str:
         current_tensor = torch.tensor([input_ids], dtype=torch.long)
         generated_words = []
 
-        temperature = 0.5
+        temperature = 0.4  # Slightly lowered for cleaner stability
         max_length = 35
 
         with torch.no_grad():
@@ -189,7 +190,7 @@ def generate_from_llm(prompt: str) -> str:
 
 @app.get("/")
 def root():
-    return {"status": "online", "model": "Shahajjo Word-Level Engine", "loaded": model is not None}
+    return {"status": "online", "model": "Shahajjo Massive Word-Level Engine", "loaded": model is not None}
 
 @app.post("/chat")
 def chat_endpoint(req: ChatRequest):
