@@ -182,14 +182,7 @@ def generate_from_llm(prompt: str) -> str:
 
         raw_output = response_text.strip()
 
-        # If output contains only punctuation or too short, return context fallback
-        if not raw_output or len(raw_output) <= 2 or all(c in ":;.,-_" for c in raw_output):
-            return f"Ami apnar kotha '{prompt}' bujhechi. Shahajjo AI apnake sahajjo korte prstut achhe!"
-
         return raw_output
-
-    except Exception as e:
-        return f"Nomoskar! Ami Sahajjo AI, apnake sahajjo korte prstut."
 
 @app.get("/")
 def root():
