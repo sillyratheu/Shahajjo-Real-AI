@@ -1,5 +1,7 @@
 fastapi
 uvicorn
 torch
+numpy
 huggingface_hub
 pydantic
+
