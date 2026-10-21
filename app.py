@@ -47,8 +47,9 @@ SOS_IDX = 2
 EOS_IDX = 3
 load_error_msg = ""
 
+# Exact Matching Tokenizer Pattern for Bangla & English words used during training
 def word_tokenize(text: str):
-    return re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
+    return re.findall(r'[\u0980-\u09FF]+|[a-zA-Z0-9]+|[^\s\w]', text, re.UNICODE)
 
 def load_shahajjo_model():
     global model, stoi, itos, PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX, load_error_msg
@@ -118,22 +119,11 @@ def encode(s: str):
 def generate_from_llm(prompt: str) -> str:
     global model, stoi, itos
 
-    # Smart Intent Matching for Real, Guaranteed Responses
-    clean_p = prompt.lower().strip()
-    if any(w in clean_p for w in ["hi", "hello", "hey", "hii", "hy"]):
-        return "Nomoskar! Ami Sahajjo AI. Apnake ajke ki bhabe sahajjo korte pari?"
-    elif any(w in clean_p for w in ["ke toiri", "creator", "who made you", "toke ke baniyeche"]):
-        return "Amake toiri korechen Ramim Rahman, Bangladesh-er Kushtia theke!"
-    elif any(w in clean_p for w in ["kemon acho", "how are you"]):
-        return "Ami bhalo achhi, Ramim bhai! Apni kemon achen?"
-    elif any(w in clean_p for w in ["nam ki", "what is your name"]):
-        return "Amar nam Sahajjo AI, ekti indigenous Bangla language model."
-
     if model is None or not stoi:
         load_shahajjo_model()
 
     if model is None or not stoi:
-        return "Nomoskar! Ami Sahajjo AI, apnake sahajjo korar jonno toyari."
+        return "মডেল লোড করতে সমস্যা হয়েছে।"
 
     try:
         formatted_prompt = f"User: {prompt} Shahajjo:"
@@ -142,8 +132,8 @@ def generate_from_llm(prompt: str) -> str:
         current_tensor = torch.tensor([input_ids], dtype=torch.long)
         generated_words = []
 
-        temperature = 0.5
-        max_length = 30
+        temperature = 0.4
+        max_length = 35
 
         with torch.no_grad():
             for step in range(max_length):
@@ -170,7 +160,7 @@ def generate_from_llm(prompt: str) -> str:
         clean_tokens = []
         for idx in generated_words:
             word_str = itos.get(idx, "")
-            if word_str not in ["<pad>", "<unk>", "<sos>", "<eos>", ":", "::"]:
+            if word_str not in ["<pad>", "<unk>", "<sos>", "<eos>"]:
                 clean_tokens.append(word_str)
 
         response_text = ""
@@ -182,7 +172,18 @@ def generate_from_llm(prompt: str) -> str:
 
         raw_output = response_text.strip()
 
-        return raw_output
+        if "User:" in raw_output:
+            raw_output = raw_output.split("User:")[0].strip()
+        if "Shahajjo:" in raw_output:
+            raw_output = raw_output.split("Shahajjo:")[-1].strip()
+
+        if raw_output and len(raw_output) > 1 and not all(c in ":;.,-_" for c in raw_output):
+            return raw_output
+
+        return "নমস্কার! আমি সাহায্য এআই।"
+
+    except Exception as e:
+        return "সিস্টেম ত্রুটি ঘটেছে।"
 
 @app.get("/")
 def root():
