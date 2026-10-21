@@ -1,204 +1,96 @@
 import os
 import json
-import re
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 from huggingface_hub import hf_hub_download
+import uvicorn
 
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-os.environ["HF_HUB_HTTP_TIMEOUT"] = "300"
+app = FastAPI(title="Shahajjo AI API", description="Indigenous Custom Bangla & English LLM API")
 
-app = FastAPI(title="Shahajjo Native Neural Engine")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+# Hugging Face Repository Configuration
 REPO_ID = "Vidclip/Shahajjo"
 
-class ShahajjoTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model=128, nhead=4, num_layers=2, pad_idx=0):
+print("📥 Downloading model.pth, config.json, and vocab.json dynamically from Hugging Face...")
+try:
+    model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
+    config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
+    vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
+    
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+        
+    with open(vocab_path, "r", encoding="utf-8") as f:
+        vocab_data = json.load(f)
+        stoi = vocab_data["stoi"] if "stoi" in vocab_data else vocab_data
+        itos = vocab_data["itos"] if "itos" in vocab_data else {str(v): k for k, v in stoi.items()}
+
+    vocab_size = config.get("vocab_size", len(stoi))
+    d_model = config.get("d_model", 512)
+    nhead = config.get("nhead", 8)
+    num_layers = config.get("num_layers", 6)
+    PAD_IDX = stoi.get("<pad>", 0)
+
+except Exception as e:
+    print(f"❌ Error loading files from HF: {e}")
+
+# Define Lightweight CPU Transformer Model for Inference
+class ShahajjoMassiveTransformer(nn.Module):
+    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=pad_idx)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=512, batch_first=True)
+        self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=PAD_IDX)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=1024, batch_first=True)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.fc_out = nn.Linear(d_model, vocab_size)
 
     def forward(self, x):
         emb = self.embedding(x)
-        out = self.transformer(emb)
+        src_key_padding_mask = (x == PAD_IDX)
+        out = self.transformer(emb, src_key_padding_mask=src_key_padding_mask)
         return self.fc_out(out)
 
-model = None
-stoi = {}
-itos = {}
-PAD_IDX = 0
-UNK_IDX = 1
-SOS_IDX = 2
-EOS_IDX = 3
-load_error_msg = ""
+print("⚙️ Initializing model architecture on CPU for Render...")
+model = ShahajjoMassiveTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
 
-def word_tokenize(text: str):
-    return re.findall(r'[\u0980-\u09FF]+|[a-zA-Z0-9]+|[^\s\w]', text, re.UNICODE)
+if os.path.exists(model_path):
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    model.eval()
+    print("✅ Model weights loaded successfully on CPU memory!")
 
-def load_shahajjo_model():
-    global model, stoi, itos, PAD_IDX, UNK_IDX, SOS_IDX, EOS_IDX, load_error_msg
-    try:
-        torch.set_num_threads(1)
-        print("📥 Downloading Model Weights & Vocab from Hugging Face...", flush=True)
-        model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
-        vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
-
-        with open(vocab_path, "r", encoding="utf-8") as f:
-            vocab_data = json.load(f)
-            if "stoi" in vocab_data:
-                stoi = vocab_data["stoi"]
-                itos = {int(k): v for k, v in vocab_data["itos"].items()}
-            else:
-                stoi = vocab_data
-                itos = {int(v): k for k, v in vocab_data.items()}
-
-        PAD_IDX = stoi.get("<pad>", 0)
-        UNK_IDX = stoi.get("<unk>", 1)
-        SOS_IDX = stoi.get("<sos>", 2)
-        EOS_IDX = stoi.get("<eos>", 3)
-
-        # Match exact config dimensions from config.json (d_model=128, nhead=4, num_layers=2)
-        d_model, nhead, num_layers = 128, 4, 2
-
-        vocab_size = len(stoi)
-        if vocab_size == 0:
-            vocab_size = 784
-
-        model = ShahajjoTransformer(
-            vocab_size=vocab_size, 
-            d_model=d_model, 
-            nhead=nhead, 
-            num_layers=num_layers, 
-            pad_idx=PAD_IDX
-        )
-
-        state_dict = torch.load(model_path, map_location=torch.device('cpu'))
-        model.load_state_dict(state_dict, strict=False)
-        model.eval()
-
-        load_error_msg = ""
-        print("🎉 Shahajjo Engine Loaded Successfully!")
-    except Exception as e:
-        load_error_msg = str(e)
-        print(f"❌ Model Loading Error: {e}")
-
-load_shahajjo_model()
-
-class ChatRequest(BaseModel):
-    message: str
-    lang: Optional[str] = "bn"
-
-def encode(s: str):
-    tokens = word_tokenize(s)
-    return [stoi.get(t, UNK_IDX) for t in tokens]
-
-def generate_from_llm(prompt: str) -> str:
-    global model, stoi, itos
-
-    if model is None or not stoi:
-        load_shahajjo_model()
-
-    if model is None or not stoi:
-        return "মডেল লোড করতে সমস্যা হয়েছে।"
-
-    try:
-        formatted_prompt = f"User: {prompt} Shahajjo:"
-        input_ids = [SOS_IDX] + encode(formatted_prompt)
-
-        current_tensor = torch.tensor([input_ids], dtype=torch.long)
-        generated_words = []
-
-        temperature = 0.5
-        max_length = 25
-
-        with torch.no_grad():
-            for step in range(max_length):
-                outputs = model(current_tensor)
-                next_token_logits = outputs[0, -1, :] / temperature
-
-                if step < 2:
-                    next_token_logits[EOS_IDX] = -1e9
-
-                for prev_id in generated_words[-3:]:
-                    if prev_id < next_token_logits.size(0):
-                        next_token_logits[prev_id] -= 2.0
-
-                probs = F.softmax(next_token_logits, dim=-1)
-                next_token_id = torch.multinomial(probs, num_samples=1).item()
-
-                if next_token_id == EOS_IDX:
-                    break
-
-                generated_words.append(next_token_id)
-                next_token_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
-                current_tensor = torch.cat([current_tensor, next_token_tensor], dim=1)
-
-        clean_tokens = []
-        for idx in generated_words:
-            word_str = itos.get(idx, "")
-            if word_str not in ["<pad>", "<unk>", "<sos>", "<eos>", ":", "::"]:
-                clean_tokens.append(word_str)
-
-        response_text = ""
-        for token in clean_tokens:
-            if token in [".", ",", "!", "?", "।"]:
-                response_text = response_text.strip() + token + " "
-            else:
-                response_text += token + " "
-
-        raw_output = response_text.strip()
-
-        if "User:" in raw_output:
-            raw_output = raw_output.split("User:")[0].strip()
-        if "Shahajjo:" in raw_output:
-            raw_output = raw_output.split("Shahajjo:")[-1].strip()
-
-        if raw_output and len(raw_output) > 1 and not all(c in ":;.,-_" for c in raw_output):
-            return raw_output
-
-        # Direct instruction fallback based on instructions.json dataset matching
-        p_lower = prompt.lower()
-        if "kemon" in p_lower or "acho" in p_lower:
-            return "আমি ভালো আছি! আপনি কেমন আছেন?"
-        elif "nam" in p_lower:
-            return "আমার নাম সাহায্য এআই।"
-        elif "ke" in p_lower and "bani" in p_lower:
-            return "আমাকে তৈরি করেছেন ১৩ বছর বয়সী তরুণ প্রোগ্রামার রামিম রহমান কুষ্টিয়া থেকে।"
-        
-        return "নমস্কার! আমি সাহায্য এআই, আপনাকে কীভাবে সাহায্য করতে পারি?"
-
-    except Exception as e:
-        return "নমস্কার! আমি সাহায্য এআই।"
+class QueryRequest(BaseModel):
+    prompt: str
 
 @app.get("/")
-def root():
-    return {"status": "online", "model": "Shahajjo Native Engine", "loaded": model is not None}
+def home():
+    return {"status": "Active", "message": "Shahajjo AI API is running successfully on Render!"}
 
-@app.post("/chat")
-def chat_endpoint(req: ChatRequest):
-    user_msg = (req.message or "").strip()
-    if not user_msg:
-        raise HTTPException(status_code=400, detail="Message is required")
-
-    response_text = generate_from_llm(user_msg)
-    return {"response": response_text}
+@app.post("/generate")
+def generate_text(request: QueryRequest):
+    try:
+        prompt = request.prompt.strip()
+        tokens = prompt.split()
+        input_ids = [stoi.get(t, stoi.get("<unk>", 1)) for t in tokens]
+        
+        if not input_ids:
+            input_ids = [stoi.get("<sos>", 2)]
+            
+        input_tensor = torch.tensor([input_ids], dtype=torch.long)
+        
+        with torch.no_grad():
+            outputs = model(input_tensor)
+            predicted_ids = torch.argmax(outputs, dim=-1).squeeze(0).tolist()
+            
+        response_words = [itos.get(str(idx), "") for idx in predicted_ids]
+        response_text = " ".join([w for w in response_words if w not in ["<pad>", "<sos>", "<eos>"]])
+        
+        if not response_text:
+            response_text = "Namaskar! Ami Shahajjo AI, apnake sahajjo korte prostut achhi."
+            
+        return {"response": response_text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    import uvicorn
     port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
