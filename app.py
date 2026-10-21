@@ -4,19 +4,27 @@ import torch
 import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, login
 import uvicorn
 
 app = FastAPI(title="Shahajjo AI API", description="Indigenous Custom Bangla & English LLM API")
 
-# Hugging Face Repository Configuration
 REPO_ID = "Vidclip/Shahajjo"
+# Render-er Environment Variable theke token nibe (Kono hardcoded token nei)
+HF_TOKEN = os.environ.get("HF_TOKEN")
 
-print("📥 Downloading model.pth, config.json, and vocab.json dynamically from Hugging Face...")
+print("📥 Authenticating and downloading model files from Hugging Face...")
 try:
-    model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
-    config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
-    vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
+    if HF_TOKEN:
+        login(token=HF_TOKEN)
+        model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth", token=HF_TOKEN)
+        config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json", token=HF_TOKEN)
+        vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json", token=HF_TOKEN)
+    else:
+        # Public download fallback if token is not passed
+        model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
+        config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
+        vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
     
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -35,7 +43,6 @@ try:
 except Exception as e:
     print(f"❌ Error loading files from HF: {e}")
 
-# Define Lightweight CPU Transformer Model for Inference
 class ShahajjoMassiveTransformer(nn.Module):
     def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6):
         super().__init__()
@@ -53,7 +60,7 @@ class ShahajjoMassiveTransformer(nn.Module):
 print("⚙️ Initializing model architecture on CPU for Render...")
 model = ShahajjoMassiveTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
 
-if os.path.exists(model_path):
+if 'model_path' in locals() and os.path.exists(model_path):
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
     print("✅ Model weights loaded successfully on CPU memory!")
