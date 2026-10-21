@@ -10,21 +10,16 @@ import uvicorn
 app = FastAPI(title="Shahajjo AI API", description="Indigenous Custom Bangla & English LLM API")
 
 REPO_ID = "Vidclip/Shahajjo"
-# Render-er Environment Variable theke token nibe (Kono hardcoded token nei)
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-print("📥 Authenticating and downloading model files from Hugging Face...")
+print("📥 Downloading model files from Hugging Face...")
 try:
     if HF_TOKEN:
         login(token=HF_TOKEN)
-        model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth", token=HF_TOKEN)
-        config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json", token=HF_TOKEN)
-        vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json", token=HF_TOKEN)
-    else:
-        # Public download fallback if token is not passed
-        model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
-        config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
-        vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
+    
+    model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
+    config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
+    vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
     
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -57,13 +52,14 @@ class ShahajjoMassiveTransformer(nn.Module):
         out = self.transformer(emb, src_key_padding_mask=src_key_padding_mask)
         return self.fc_out(out)
 
-print("⚙️ Initializing model architecture on CPU for Render...")
+print("⚙️ Initializing model architecture on CPU...")
 model = ShahajjoMassiveTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
 
 if 'model_path' in locals() and os.path.exists(model_path):
+    # Load strictly on CPU to save RAM
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    print("✅ Model weights loaded successfully on CPU memory!")
+    print("✅ Model weights successfully loaded on CPU!")
 
 class QueryRequest(BaseModel):
     prompt: str
