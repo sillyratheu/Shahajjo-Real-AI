@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from tokenizers import Tokenizer
 
-app = FastAPI(title="Banglish Text Classifier API", version="1.0")
+app = FastAPI(title="Shahajjo", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,7 +43,7 @@ model = BanglishLSTMClassifier(VOCAB_SIZE, EMBED_DIM, HIDDEN_DIM, NUM_CLASSES)
 model.eval()
 
 try:
-    tokenizer = Tokenizer.from_file("tokenizer_3.json")
+    tokenizer = Tokenizer.from_file("tokenizer.json")
 except Exception as e:
     tokenizer = None
 
@@ -52,7 +52,7 @@ class TextRequest(BaseModel):
 
 def get_prediction(text: str):
     if tokenizer is None:
-        raise HTTPException(status_code=500, detail="Tokenizer file (tokenizer_3.json) not found on server.")
+        raise HTTPException(status_code=500, detail="Tokenizer file (tokenizer.json) not found on server.")
     if not text.strip():
         raise HTTPException(status_code=400, detail="Input text cannot be empty.")
 
@@ -87,7 +87,7 @@ def get_prediction(text: str):
 
 @app.get("/")
 def home():
-    return {"message": "Banglish Text Classifier API is running successfully!"}
+    return {"message": "Shahajjo is running on it's API. Use this link https://shahajjo-real-ai.onrender.com/predict to use Shahajjo AI!"}
 
 # 1. GET Method (Jate browser-er link theke direct use kora jay, e.g., /predict?text=amar+bhalo+lage)
 @app.get("/predict")
