@@ -4,19 +4,16 @@ import torch
 import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from huggingface_hub import hf_hub_download, login
+from huggingface_hub import hf_hub_download
 import uvicorn
 
 app = FastAPI(title="Shahajjo AI API", description="Indigenous Custom Bangla & English LLM API")
 
+# Hugging Face Repository Configuration
 REPO_ID = "Vidclip/Shahajjo"
-HF_TOKEN = os.environ.get("HF_TOKEN")
 
-print("📥 Downloading model files from Hugging Face...")
+print("📥 Downloading model.pth, config.json, and vocab.json dynamically from Hugging Face...")
 try:
-    if HF_TOKEN:
-        login(token=HF_TOKEN)
-    
     model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
     config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
     vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
@@ -38,6 +35,7 @@ try:
 except Exception as e:
     print(f"❌ Error loading files from HF: {e}")
 
+# Define Lightweight CPU Transformer Model for Inference
 class ShahajjoMassiveTransformer(nn.Module):
     def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6):
         super().__init__()
@@ -52,14 +50,13 @@ class ShahajjoMassiveTransformer(nn.Module):
         out = self.transformer(emb, src_key_padding_mask=src_key_padding_mask)
         return self.fc_out(out)
 
-print("⚙️ Initializing model architecture on CPU...")
+print("⚙️ Initializing model architecture on CPU for Render...")
 model = ShahajjoMassiveTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
 
-if 'model_path' in locals() and os.path.exists(model_path):
-    # Load strictly on CPU to save RAM
+if os.path.exists(model_path):
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    print("✅ Model weights successfully loaded on CPU!")
+    print("✅ Model weights loaded successfully on CPU memory!")
 
 class QueryRequest(BaseModel):
     prompt: str
@@ -78,29 +75,16 @@ def generate_text(request: QueryRequest):
         if not input_ids:
             input_ids = [stoi.get("<sos>", 2)]
             
-        generated_ids = list(input_ids)
-        model.eval()
+        input_tensor = torch.tensor([input_ids], dtype=torch.long)
         
         with torch.no_grad():
-            # Autoregressive generation loop (token-by-token prediction)
-            for _ in range(25):  # Max 25 tokens generate korbe
-                input_tensor = torch.tensor([generated_ids], dtype=torch.long)
-                outputs = model(input_tensor)
-                
-                # Shesh token er logits nie next token predict korbe
-                next_token_logits = outputs[0, -1, :]
-                next_token_id = torch.argmax(next_token_logits).item()
-                
-                # Jodi EOS token pay tahole theme jabe
-                if next_token_id == stoi.get("<eos>", 3):
-                    break
-                    
-                generated_ids.append(next_token_id)
+            outputs = model(input_tensor)
+            predicted_ids = torch.argmax(outputs, dim=-1).squeeze(0).tolist()
             
-        response_words = [itos.get(str(idx), "") for idx in generated_ids]
+        response_words = [itos.get(str(idx), "") for idx in predicted_ids]
         response_text = " ".join([w for w in response_words if w not in ["<pad>", "<sos>", "<eos>"]])
         
-        if not response_text.strip():
+        if not response_text:
             response_text = "Namaskar! Ami Shahajjo AI, apnake sahajjo korte prostut achhi."
             
         return {"response": response_text}
