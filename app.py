@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import torch
@@ -7,7 +7,6 @@ from tokenizers import Tokenizer
 
 app = FastAPI(title="Banglish Text Classifier API", version="1.0")
 
-# 🟢 CORS Middleware (Browser Request Allow Korar Jonno Must)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,7 +15,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# VOCAB_SIZE = 2324 (matching tokenizer_3.json)
 VOCAB_SIZE = 2324
 EMBED_DIM = 64
 HIDDEN_DIM = 128
@@ -52,19 +50,13 @@ except Exception as e:
 class TextRequest(BaseModel):
     text: str
 
-@app.get("/")
-def home():
-    return {"message": "Banglish Text Classifier API is running successfully!"}
-
-@app.post("/predict")
-def predict_text(request: TextRequest):
+def get_prediction(text: str):
     if tokenizer is None:
         raise HTTPException(status_code=500, detail="Tokenizer file (tokenizer_3.json) not found on server.")
-    
-    if not request.text.strip():
+    if not text.strip():
         raise HTTPException(status_code=400, detail="Input text cannot be empty.")
 
-    encoded = tokenizer.encode(request.text)
+    encoded = tokenizer.encode(text)
     tokens = encoded.tokens
     token_ids = encoded.ids
 
@@ -82,7 +74,7 @@ def predict_text(request: TextRequest):
     confidence = float(probs.max() * 100)
 
     return {
-        "text": request.text,
+        "text": text,
         "tokens": tokens,
         "token_ids": token_ids,
         "predicted_label": pred_class,
@@ -92,3 +84,17 @@ def predict_text(request: TextRequest):
             labels[1]: round(float(probs[1]), 4)
         }
     }
+
+@app.get("/")
+def home():
+    return {"message": "Banglish Text Classifier API is running successfully!"}
+
+# 1. GET Method (Jate browser-er link theke direct use kora jay, e.g., /predict?text=amar+bhalo+lage)
+@app.get("/predict")
+def predict_get(text: str = Query(..., description="Text to classify")):
+    return get_prediction(text)
+
+# 2. POST Method (Standard API apps ba code er jonno)
+@app.post("/predict")
+def predict_post(request: TextRequest):
+    return get_prediction(request.text)
