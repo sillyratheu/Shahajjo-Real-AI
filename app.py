@@ -1,96 +1,69 @@
-import os
-import json
-import torch
-import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from huggingface_hub import hf_hub_download
-import uvicorn
+import torch
+import torch.nn as nn
+from safetensors.torch import load_file
+from typing import List
 
-app = FastAPI(title="Shahajjo AI API", description="Indigenous Custom Bangla & English LLM API")
-
-# Hugging Face Repository Configuration
-REPO_ID = "Vidclip/Shahajjo"
-
-print("📥 Downloading model.pth, config.json, and vocab.json dynamically from Hugging Face...")
-try:
-    model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
-    config_path = hf_hub_download(repo_id=REPO_ID, filename="config.json")
-    vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
-    
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
+# 1. Define Model Architecture
+class CustomTransformerModel(nn.Module):
+    def __init__(self, vocab_size=8000, d_model=512, nhead=8, num_layers=4, dim_feedforward=2048):
+        super(CustomTransformerModel, self).__init__()
         
-    with open(vocab_path, "r", encoding="utf-8") as f:
-        vocab_data = json.load(f)
-        stoi = vocab_data["stoi"] if "stoi" in vocab_data else vocab_data
-        itos = vocab_data["itos"] if "itos" in vocab_data else {str(v): k for k, v in stoi.items()}
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.fc = nn.Linear(d_model, vocab_size)
 
-    vocab_size = config.get("vocab_size", len(stoi))
-    d_model = config.get("d_model", 512)
-    nhead = config.get("nhead", 8)
-    num_layers = config.get("num_layers", 6)
-    PAD_IDX = stoi.get("<pad>", 0)
+    def forward(self, src):
+        out = self.embedding(src)
+        out = self.transformer_encoder(out)
+        out = self.fc(out)
+        return out
 
-except Exception as e:
-    print(f"❌ Error loading files from HF: {e}")
+# Initialize FastAPI App
+app = FastAPI(title="Transformer Model API")
 
-# Define Lightweight CPU Transformer Model for Inference
-class ShahajjoMassiveTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=6):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=PAD_IDX)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=1024, batch_first=True)
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.fc_out = nn.Linear(d_model, vocab_size)
+# Load Model Weights
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = CustomTransformerModel().to(device)
 
-    def forward(self, x):
-        emb = self.embedding(x)
-        src_key_padding_mask = (x == PAD_IDX)
-        out = self.transformer(emb, src_key_padding_mask=src_key_padding_mask)
-        return self.fc_out(out)
-
-print("⚙️ Initializing model architecture on CPU for Render...")
-model = ShahajjoMassiveTransformer(vocab_size=vocab_size, d_model=d_model, nhead=nhead, num_layers=num_layers)
-
-if os.path.exists(model_path):
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+weights_path = "model.safetensors"
+try:
+    state_dict = load_file(weights_path)
+    model.load_state_dict(state_dict)
     model.eval()
-    print("✅ Model weights loaded successfully on CPU memory!")
+    print("Model weights successfully loaded!")
+except Exception as e:
+    print(f"Error loading model weights: {e}")
 
-class QueryRequest(BaseModel):
-    prompt: str
+# Define Input Request Schema
+class InputData(BaseModel):
+    input_ids: List[int]
 
 @app.get("/")
 def home():
-    return {"status": "Active", "message": "Shahajjo AI API is running successfully on Render!"}
+    return {"message": "Transformer API is running!"}
 
-@app.post("/generate")
-def generate_text(request: QueryRequest):
+# Prediction Endpoint
+@app.post("/predict")
+def predict(data: InputData):
     try:
-        prompt = request.prompt.strip()
-        tokens = prompt.split()
-        input_ids = [stoi.get(t, stoi.get("<unk>", 1)) for t in tokens]
-        
-        if not input_ids:
-            input_ids = [stoi.get("<sos>", 2)]
+        if not data.input_ids:
+            raise HTTPException(status_code=400, detail="input_ids list empty hote parbe na.")
             
-        input_tensor = torch.tensor([input_ids], dtype=torch.long)
+        tensor_input = torch.tensor([data.input_ids], dtype=torch.long).to(device)
         
         with torch.no_grad():
-            outputs = model(input_tensor)
-            predicted_ids = torch.argmax(outputs, dim=-1).squeeze(0).tolist()
+            output = model(tensor_input)
+            predictions = torch.argmax(output, dim=-1).cpu().numpy().tolist()[0]
             
-        response_words = [itos.get(str(idx), "") for idx in predicted_ids]
-        response_text = " ".join([w for w in response_words if w not in ["<pad>", "<sos>", "<eos>"]])
-        
-        if not response_text:
-            response_text = "Namaskar! Ami Shahajjo AI, apnake sahajjo korte prostut achhi."
-            
-        return {"response": response_text}
+        return {"predictions": predictions}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
