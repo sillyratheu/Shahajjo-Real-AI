@@ -2,4 +2,6 @@ fastapi
 uvicorn
 torch --extra-index-url https://download.pytorch.org/whl/cpu
 transformers
+huggingface_hub
 tokenizers
+pydantic
