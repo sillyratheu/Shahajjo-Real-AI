@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import torch
 import torch.nn as nn
@@ -6,7 +7,16 @@ from tokenizers import Tokenizer
 
 app = FastAPI(title="Banglish Text Classifier API", version="1.0")
 
-# Define the PyTorch Model Architecture matching vocabulary size (2324 tokens)
+# 🟢 FIX FOR CORS ERROR: Allows requests from any web page / frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Define PyTorch Model Architecture (VOCAB_SIZE matches tokenizer_3.json)
 VOCAB_SIZE = 2324
 EMBED_DIM = 64
 HIDDEN_DIM = 128
@@ -25,18 +35,16 @@ class BanglishLSTMClassifier(nn.Module):
     def forward(self, x):
         embedded = self.embedding(x)
         lstm_out, (hn, cn) = self.lstm(embedded)
-        # Global max pooling
         pooled, _ = torch.max(lstm_out, dim=1)
         x = self.relu(self.fc1(pooled))
         x = self.dropout(x)
         out = self.fc2(x)
         return out
 
-# Initialize Model and Tokenizer globally
+# Initialize Model and Tokenizer
 model = BanglishLSTMClassifier(VOCAB_SIZE, EMBED_DIM, HIDDEN_DIM, NUM_CLASSES)
 model.eval()
 
-# Load custom BPE Tokenizer from tokenizer_3.json
 try:
     tokenizer = Tokenizer.from_file("tokenizer_3.json")
 except Exception as e:
@@ -57,18 +65,15 @@ def predict_text(request: TextRequest):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Input text cannot be empty.")
 
-    # Tokenize input text
     encoded = tokenizer.encode(request.text)
     tokens = encoded.tokens
     token_ids = encoded.ids
 
-    # Prepare tensor input (pad/truncate to 128)
     pad_id = 1
     max_len = 128
     padded_ids = token_ids[:max_len] + [pad_id] * max(0, max_len - len(token_ids))
     input_tensor = torch.tensor([padded_ids], dtype=torch.long)
 
-    # Model Inference
     with torch.no_grad():
         logits = model(input_tensor)
         probs = torch.softmax(logits, dim=1).numpy()[0]
