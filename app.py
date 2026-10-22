@@ -1,77 +1,88 @@
-import os
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
+# -*- coding: utf-8 -*-
+import torch
+import torch.nn as nn
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from transformers import PretrainedConfig, PreTrainedModel, PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
-from tokenizers import Tokenizer
+import os
 
-app = FastAPI(title="Shahajjo AI Chat API", version="1.0")
+app = FastAPI(title="Shahajjo AI API", version="1.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+REPO_ID = "Vidclip/Shahajjo"
 
-REPO_ID = "vidclip/Shahajjo"
+# Lightweight Model Config & Architecture for Render
+class ShahajjoLightConfig(PretrainedConfig):
+    model_type = "shahajjo_light"
+    def __init__(self, vocab_size=12000, hidden_size=384, num_hidden_layers=3, num_attention_heads=6, intermediate_size=1536, **kwargs):
+        super().__init__(**kwargs)
+        self.vocab_size = vocab_size
+        self.hidden_size = hidden_size
+        self.num_hidden_layers = num_hidden_layers
+        self.num_attention_heads = num_attention_heads
+        self.intermediate_size = intermediate_size
 
-# Hugging Face theke model files automatic download korar jonno
-def download_model_files():
-    files = ["model.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json"]
-    for file in files:
-        if not os.path.exists(file):
-            try:
-                print(f"Downloading {file} from Hugging Face ({REPO_ID})...")
-                hf_hub_download(repo_id=REPO_ID, filename=file, local_dir=".")
-            except Exception as e:
-                print(f"Could not download {file}: {e}")
+class ShahajjoLightModel(PreTrainedModel):
+    config_class = ShahajjoLightConfig
+    def __init__(self, config):
+        super().__init__(config)
+        self.config = config
+        self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=config.hidden_size, 
+            nhead=config.num_attention_heads, 
+            dim_feedforward=config.intermediate_size,
+            batch_first=True,
+            dropout=0.1
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=config.num_hidden_layers)
+        self.fc = nn.Linear(config.hidden_size, config.vocab_size)
+        
+    def forward(self, input_ids, labels=None, **kwargs):
+        x = self.embedding(input_ids)
+        out = self.transformer_encoder(x)
+        logits = self.fc(out)
+        return {"logits": logits}
 
-download_model_files()
-
-# Tokenizer load kora
+model = None
 tokenizer = None
-if os.path.exists("tokenizer.json"):
-    try:
-        tokenizer = Tokenizer.from_file("tokenizer.json")
-        print("Tokenizer loaded successfully!")
-    except Exception as e:
-        print(f"Tokenizer load error: {e}")
 
-class TextRequest(BaseModel):
+@app.on_event("startup")
+def load_model_and_tokenizer():
+    global model, tokenizer
+    print("Hugging Face theke model ebong tokenizer download o load kora hocche...")
+    
+    model_path = hf_hub_download(repo_id=REPO_ID, filename="model.pth")
+    vocab_path = hf_hub_download(repo_id=REPO_ID, filename="vocab.json")
+    
+    tokenizer = PreTrainedTokenizerFast(tokenizer_file=vocab_path)
+    tokenizer.pad_token = "<pad>"
+    
+    config = ShahajjoLightConfig()
+    model = ShahajjoLightModel(config)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device("cpu")))
+    model.eval()
+    print("Model successfully loaded!")
+
+class PromptRequest(BaseModel):
     prompt: str
+
+@app.post("/api")
+def generate_text(request: PromptRequest):
+    if model is None or tokenizer is None:
+        raise HTTPException(status_code=500, detail="Model ekhono load hoyni!")
+    
+    inputs = tokenizer(request.prompt, return_tensors="pt")
+    input_ids = inputs["input_ids"]
+    
+    with torch.no_grad():
+        outputs = model(input_ids)
+        logits = outputs["logits"]
+        predicted_ids = torch.argmax(logits, dim=-1)
+        
+    generated_text = tokenizer.decode(predicted_ids[0], skip_special_tokens=True)
+    return {"prompt": request.prompt, "response": generated_text}
 
 @app.get("/")
 def home():
-    return {
-        "message": "Shahajjo AI Chat API is running successfully!",
-        "tokenizer_loaded": tokenizer is not None,
-        "model_file_exists": os.path.exists("model.safetensors")
-    }
-
-# /chat endpoint - ChatGPT ba Gemini API er moto direct text/word response dibe
-@app.get("/chat")
-def chat_get(text: str = Query(..., description="Prompt for Shahajjo AI")):
-    if tokenizer is None:
-        raise HTTPException(status_code=500, detail="Tokenizer not loaded.")
-    
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
-
-    # Tokenizer er maddhome text ke tokenize ebong abar decode/transform kore word e rupantor kora
-    encoded = tokenizer.encode(text)
-    token_ids = encoded.ids
-    
-    # Token IDs gulo ke tokenizer er maddhome abar readable words ba text e transform kora
-    decoded_response = tokenizer.decode(token_ids)
-
-    return {
-        "status": "success",
-        "prompt": text,
-        "response": decoded_response
-    }
-
-@app.post("/chat")
-def chat_post(request: TextRequest):
-    return chat_get(request.prompt)
+    return {"status": "Shahajjo API is active and running successfully!"}
