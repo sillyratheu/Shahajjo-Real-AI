@@ -1,0 +1,14 @@
+{
+  "architectures": [
+    "ShahajjoTransformerModel"
+  ],
+  "dtype": "float32",
+  "hidden_size": 512,
+  "intermediate_size": 2048,
+  "model_type": "shahajjo_transformer",
+  "num_attention_heads": 8,
+  "num_hidden_layers": 4,
+  "transformers_version": "5.20.1",
+  "use_cache": false,
+  "vocab_size": 8000
+}
