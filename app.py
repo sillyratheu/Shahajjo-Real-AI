@@ -37,9 +37,9 @@ def load_tokenizer_and_model():
     """Load and initialize the tokenizer and model."""
     # Load custom BPE Tokenizer from tokenizer_2.json
     try:
-        tokenizer = Tokenizer.from_file("tokenizer_2.json")
+        tokenizer = Tokenizer.from_file("tokenizer.json")
     except Exception as e:
-        st.error(f"Error loading tokenizer_2.json: {e}")
+        st.error(f"Error loading tokenizer.json: {e}")
         tokenizer = None
 
     model = BanglishLSTMClassifier(VOCAB_SIZE, EMBED_DIM, HIDDEN_DIM, NUM_CLASSES)
