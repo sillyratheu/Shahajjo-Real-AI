@@ -1,9 +1,12 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import torch
 import torch.nn as nn
 from safetensors.torch import load_file
+from huggingface_hub import hf_hub_download
 from typing import List
+import os
 
 # 1. Define Model Architecture
 class CustomTransformerModel(nn.Module):
@@ -30,16 +33,33 @@ class CustomTransformerModel(nn.Module):
 # Initialize FastAPI App
 app = FastAPI(title="Transformer Model API")
 
-# Load Model Weights
+# Enable CORS (Frontend/App connection-er jonno khubi dorkari)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  // Shob source theke request allow korar jonno
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Load Model Weights from Hugging Face
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = CustomTransformerModel().to(device)
 
-weights_path = "model.safetensors"
 try:
+    print("Downloading model weights from Hugging Face...")
+    hf_token = os.getenv("HF_TOKEN")
+    
+    weights_path = hf_hub_download(
+        repo_id="Vidclip/Shahajjo", 
+        filename="model.safetensors",
+        token=hf_token
+    )
+    
     state_dict = load_file(weights_path)
     model.load_state_dict(state_dict)
     model.eval()
-    print("Model weights successfully loaded!")
+    print("Model weights successfully loaded from Hugging Face!")
 except Exception as e:
     print(f"Error loading model weights: {e}")
 
