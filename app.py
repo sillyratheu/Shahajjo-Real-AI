@@ -35,7 +35,7 @@ class BanglishLSTMClassifier(nn.Module):
 @st.cache_resource
 def load_tokenizer_and_model():
     """Load and initialize the tokenizer and model."""
-    # Load custom BPE Tokenizer from tokenizer_2.json
+    # Load custom BPE Tokenizer from tokenizer.json
     try:
         tokenizer = Tokenizer.from_file("tokenizer.json")
     except Exception as e:
@@ -47,7 +47,7 @@ def load_tokenizer_and_model():
     return tokenizer, model
 
 def tokenize_text(tokenizer, text):
-    """Tokenize text using tokenizer_2.json configuration."""
+    """Tokenize text using tokenizer.json configuration."""
     if tokenizer is None:
         return []
     encoded = tokenizer.encode(text)
