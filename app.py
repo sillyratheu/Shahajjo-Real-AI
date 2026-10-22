@@ -1,11 +1,12 @@
-import json
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 import torch
 import torch.nn as nn
 from tokenizers import Tokenizer
-import matplotlib.pyplot as plt
-import pandas as pd
 
-# Define the PyTorch Model Architecture matching vocabulary size from tokenizer.json (2323 tokens)
+app = FastAPI(title="Banglish Text Classifier API", version="1.0")
+
+# Define the PyTorch Model Architecture matching vocabulary size (2324 tokens)
 VOCAB_SIZE = 2324
 EMBED_DIM = 64
 HIDDEN_DIM = 128
@@ -20,7 +21,7 @@ class BanglishLSTMClassifier(nn.Module):
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.3)
         self.fc2 = nn.Linear(64, num_classes)
-        
+
     def forward(self, x):
         embedded = self.embedding(x)
         lstm_out, (hn, cn) = self.lstm(embedded)
@@ -31,111 +32,59 @@ class BanglishLSTMClassifier(nn.Module):
         out = self.fc2(x)
         return out
 
-@st.cache_resource
-def load_tokenizer_and_model():
-    """Load and initialize the tokenizer and model."""
-    # Load custom BPE Tokenizer from tokenizer.json
-    try:
-        tokenizer = Tokenizer.from_file("tokenizer.json")
-    except Exception as e:
-        st.error(f"Error loading tokenizer.json: {e}")
-        tokenizer = None
+# Initialize Model and Tokenizer globally
+model = BanglishLSTMClassifier(VOCAB_SIZE, EMBED_DIM, HIDDEN_DIM, NUM_CLASSES)
+model.eval()
 
-    model = BanglishLSTMClassifier(VOCAB_SIZE, EMBED_DIM, HIDDEN_DIM, NUM_CLASSES)
-    model.eval()
-    return tokenizer, model
+# Load custom BPE Tokenizer from tokenizer_3.json
+try:
+    tokenizer = Tokenizer.from_file("tokenizer_3.json")
+except Exception as e:
+    tokenizer = None
 
-def tokenize_text(tokenizer, text):
-    """Tokenize text using tokenizer.json configuration."""
+class TextRequest(BaseModel):
+    text: str
+
+@app.get("/")
+def home():
+    return {"message": "Banglish Text Classifier API is running successfully!"}
+
+@app.post("/predict")
+def predict_text(request: TextRequest):
     if tokenizer is None:
-        return []
-    encoded = tokenizer.encode(text)
-    return encoded
+        raise HTTPException(status_code=500, detail="Tokenizer file (tokenizer_3.json) not found on server.")
+    
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Input text cannot be empty.")
 
-# Streamlit Page Config
-st.set_page_config(
-    page_title="Banglish Text Classifier",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+    # Tokenize input text
+    encoded = tokenizer.encode(request.text)
+    tokens = encoded.tokens
+    token_ids = encoded.ids
 
-# Sidebar
-st.sidebar.title("Configuration & Info")
-st.sidebar.info(
-    "This app tokenizes and classifies Banglish/Bengali text using the `tokenizer.json` BPE vocabulary configuration."
-)
+    # Prepare tensor input (pad/truncate to 128)
+    pad_id = 1
+    max_len = 128
+    padded_ids = token_ids[:max_len] + [pad_id] * max(0, max_len - len(token_ids))
+    input_tensor = torch.tensor([padded_ids], dtype=torch.long)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("Tokenizer Stats")
-st.sidebar.write(f"**Vocab Size:** {VOCAB_SIZE} tokens")
-st.sidebar.write("**Max Sequence Length:** 128")
-st.sidebar.write("**Padding Token:** `<pad>` (ID: 1)")
-st.sidebar.write("**Unknown Token:** `<unk>` (ID: 0)")
+    # Model Inference
+    with torch.no_grad():
+        logits = model(input_tensor)
+        probs = torch.softmax(logits, dim=1).numpy()[0]
 
-# Main Layout
-st.title("🇧🇩 Banglish Text Analysis & Classification")
-st.markdown("Enter Banglish or Bengali text below to inspect tokenization and predicted sentiment/category probabilities.")
+    labels = ["Negative / Non-Standard", "Positive / Standard"]
+    pred_class = labels[probs.argmax()]
+    confidence = float(probs.max() * 100)
 
-tokenizer, model = load_tokenizer_and_model()
-
-user_input = st.text_area(
-    "Input Text:",
-    value="Amar bangla khub bhalo lage!",
-    height=100,
-    placeholder="Type here..."
-)
-
-col1, col2 = st.columns([1, 1])
-
-if st.button("Analyze Text", type="primary"):
-    if user_input.strip() and tokenizer:
-        encoded = tokenize_text(tokenizer, user_input)
-        tokens = encoded.tokens
-        token_ids = encoded.ids
-        
-        with col1:
-            st.subheader("🔍 Tokenization Breakdown")
-            st.write(f"**Total Tokens Generated:** {len(tokens)}")
-            
-            # Display Tokens Table
-            df_tokens = pd.DataFrame({
-                "Token": tokens,
-                "Token ID": token_ids
-            })
-            st.dataframe(df_tokens, use_container_width=True)
-
-        with col2:
-            st.subheader("📊 Classification Results")
-            
-            # Prepare tensor input (pad/truncate to 128)
-            pad_id = 1
-            max_len = 128
-            padded_ids = token_ids[:max_len] + [pad_id] * max(0, max_len - len(token_ids))
-            input_tensor = torch.tensor([padded_ids], dtype=torch.long)
-            
-            # Model Inference
-            with torch.no_grad():
-                logits = model(input_tensor)
-                probs = torch.softmax(logits, dim=1).numpy()[0]
-            
-            labels = ["Negative / Non-Standard", "Positive / Standard"]
-            
-            # Display Prediction
-            pred_class = labels[probs.argmax()]
-            confidence = probs.max() * 100
-            
-            st.metric("Predicted Label", pred_class, f"{confidence:.2f}% confidence")
-            
-            # Confidence Chart
-            fig, ax = plt.subplots(figsize=(6, 3))
-            ax.barh(labels, probs, color=['#ff6b6b', '#51cf66'])
-            ax.set_xlim(0, 1)
-            ax.set_xlabel("Probability")
-            ax.set_title("Prediction Confidence")
-            st.pyplot(fig)
-            
-    elif not tokenizer:
-        st.error("Tokenizer file (`tokenizer.json`) not found or failed to load. Please ensure it is present in the working directory.")
-    else:
-        st.warning("Please enter some text to analyze.")
+    return {
+        "text": request.text,
+        "tokens": tokens,
+        "token_ids": token_ids,
+        "predicted_label": pred_class,
+        "confidence_percentage": round(confidence, 2),
+        "probabilities": {
+            labels[0]: round(float(probs[0]), 4),
+            labels[1]: round(float(probs[1]), 4)
+        }
+    }
