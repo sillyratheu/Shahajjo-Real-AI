@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
+import os
 import torch
+
+# Render Free Tier (512MB RAM) er jonno memory optimize korar baire
+torch.set_num_threads(1)
+os.environ["OMP_NUM_THREADS"] = "1"
+
 import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import PretrainedConfig, PreTrainedModel, PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
-import os
 
 app = FastAPI(title="Shahajjo AI API", version="1.0")
 
