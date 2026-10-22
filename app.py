@@ -6,7 +6,7 @@ from tokenizers import Tokenizer
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# Define the PyTorch Model Architecture matching vocabulary size from tokenizer_2.json (2323 tokens)
+# Define the PyTorch Model Architecture matching vocabulary size from tokenizer.json (2323 tokens)
 VOCAB_SIZE = 2324
 EMBED_DIM = 64
 HIDDEN_DIM = 128
@@ -64,7 +64,7 @@ st.set_page_config(
 # Sidebar
 st.sidebar.title("Configuration & Info")
 st.sidebar.info(
-    "This app tokenizes and classifies Banglish/Bengali text using the `tokenizer_2.json` BPE vocabulary configuration."
+    "This app tokenizes and classifies Banglish/Bengali text using the `tokenizer.json` BPE vocabulary configuration."
 )
 
 st.sidebar.markdown("---")
@@ -137,6 +137,6 @@ if st.button("Analyze Text", type="primary"):
             st.pyplot(fig)
             
     elif not tokenizer:
-        st.error("Tokenizer file (`tokenizer_2.json`) not found or failed to load. Please ensure it is present in the working directory.")
+        st.error("Tokenizer file (`tokenizer.json`) not found or failed to load. Please ensure it is present in the working directory.")
     else:
         st.warning("Please enter some text to analyze.")
