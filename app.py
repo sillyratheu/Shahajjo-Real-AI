@@ -33,10 +33,10 @@ class CustomTransformerModel(nn.Module):
 # Initialize FastAPI App
 app = FastAPI(title="Transformer Model API")
 
-# Enable CORS (Frontend/App connection-er jonno khubi dorkari)
+# Enable CORS (# diye comment kora holo)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  // Shob source theke request allow korar jonno
+    allow_origins=["*"],  # Shob source theke request allow korar jonno
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
