@@ -7,7 +7,7 @@ from tokenizers import Tokenizer
 
 app = FastAPI(title="Banglish Text Classifier API", version="1.0")
 
-# 🟢 FIX FOR CORS ERROR: Allows requests from any web page / frontend
+# 🟢 CORS Middleware (Browser Request Allow Korar Jonno Must)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,7 +16,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Define PyTorch Model Architecture (VOCAB_SIZE matches tokenizer_3.json)
+# VOCAB_SIZE = 2324 (matching tokenizer_3.json)
 VOCAB_SIZE = 2324
 EMBED_DIM = 64
 HIDDEN_DIM = 128
@@ -41,7 +41,6 @@ class BanglishLSTMClassifier(nn.Module):
         out = self.fc2(x)
         return out
 
-# Initialize Model and Tokenizer
 model = BanglishLSTMClassifier(VOCAB_SIZE, EMBED_DIM, HIDDEN_DIM, NUM_CLASSES)
 model.eval()
 
