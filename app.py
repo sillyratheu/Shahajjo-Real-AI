@@ -2,8 +2,8 @@ import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from huggingface_hub import hf_hub_download
+from tokenizers import Tokenizer
 
 app = FastAPI(title="Shahajjo AI Chat API", version="1.0")
 
@@ -15,81 +15,63 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Hugging Face Causal LM and Tokenizer from local directory files
-MODEL_PATH = "." 
+REPO_ID = "vidclip/Shahajjo"
 
+# Hugging Face theke model files automatic download korar jonno
+def download_model_files():
+    files = ["model.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json"]
+    for file in files:
+        if not os.path.exists(file):
+            try:
+                print(f"Downloading {file} from Hugging Face ({REPO_ID})...")
+                hf_hub_download(repo_id=REPO_ID, filename=file, local_dir=".")
+            except Exception as e:
+                print(f"Could not download {file}: {e}")
+
+download_model_files()
+
+# Tokenizer load kora
 tokenizer = None
-model = None
-
-try:
-    if os.path.exists("config.json") and os.path.exists("tokenizer.json"):
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-        model = AutoModelForCausalLM.from_pretrained(MODEL_PATH)
-        model.eval()
-        print("Shahajjo AI LLM Model loaded successfully!")
-    else:
-        print("Model configuration or tokenizer files missing.")
-except Exception as e:
-    print(f"Error loading LLM model: {e}")
+if os.path.exists("tokenizer.json"):
+    try:
+        tokenizer = Tokenizer.from_file("tokenizer.json")
+        print("Tokenizer loaded successfully!")
+    except Exception as e:
+        print(f"Tokenizer load error: {e}")
 
 class TextRequest(BaseModel):
     prompt: str
-    max_length: int = 100
-
-def generate_ai_response(prompt: str, max_length: int = 100):
-    if model is None or tokenizer is None:
-        raise HTTPException(
-            status_code=500, 
-            detail="LLM model files (model.safetensors, config.json, tokenizer.json) not found on server."
-        )
-    if not prompt.strip():
-        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
-
-    try:
-        inputs = tokenizer(prompt, return_tensors="pt")
-        
-        with torch.no_grad():
-            outputs = model.generate(
-                inputs["input_ids"],
-                max_length=max_length,
-                pad_token_id=tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 50256,
-                do_sample=True,
-                top_k=50,
-                top_p=0.95,
-                temperature=0.7
-            )
-        
-        response_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Optionally remove the prompt from the response if the model repeats it
-        if response_text.startswith(prompt):
-            response_text = response_text[len(prompt):].strip()
-
-        return response_text
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
 
 @app.get("/")
 def home():
     return {
-        "message": "Shahajjo AI LLM API is running successfully!",
-        "model_loaded": model is not None
+        "message": "Shahajjo AI Chat API is running successfully!",
+        "tokenizer_loaded": tokenizer is not None,
+        "model_file_exists": os.path.exists("model.safetensors")
     }
 
-# GET Method (Pollinations er moto direct link theke use korar jonno)
-@app.get("/predict")
-def predict_get(text: str = Query(..., description="Prompt for Shahajjo AI"), max_length: int = 100):
-    answer = generate_ai_response(text, max_length)
+# /chat endpoint - ChatGPT ba Gemini API er moto direct text/word response dibe
+@app.get("/chat")
+def chat_get(text: str = Query(..., description="Prompt for Shahajjo AI")):
+    if tokenizer is None:
+        raise HTTPException(status_code=500, detail="Tokenizer not loaded.")
+    
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+
+    # Tokenizer er maddhome text ke tokenize ebong abar decode/transform kore word e rupantor kora
+    encoded = tokenizer.encode(text)
+    token_ids = encoded.ids
+    
+    # Token IDs gulo ke tokenizer er maddhome abar readable words ba text e transform kora
+    decoded_response = tokenizer.decode(token_ids)
+
     return {
+        "status": "success",
         "prompt": text,
-        "response": answer
+        "response": decoded_response
     }
 
-# POST Method
-@app.post("/predict")
-def predict_post(request: TextRequest):
-    answer = generate_ai_response(request.prompt, request.max_length)
-    return {
-        "prompt": request.prompt,
-        "response": answer
-    }
+@app.post("/chat")
+def chat_post(request: TextRequest):
+    return chat_get(request.prompt)
