@@ -1,7 +1,7 @@
 import os
-import re
 import json
 import requests
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -39,25 +39,19 @@ def chat_get(text: str = Query(..., description="Prompt for Shahajjo AI")):
         response = requests.get(target_url, headers=headers, timeout=25)
         
         if response.status_code == 200:
-            html_content = response.text
+            # BeautifulSoup diye HTML parse kora
+            soup = BeautifulSoup(response.text, 'html.parser')
+            target_div = soup.find('div', id='real-json-output')
             
-            # HTML er vitor theke JSON pattern ({...}) khuje ber korar regex
-            matches = re.findall(r'(\{[\s\S]*?"status"\s*:\s*"[a-zA-Z]+"[\s\S]*?\})', html_content)
-            for match in matches:
+            if target_div:
                 try:
-                    parsed = json.loads(match)
-                    if "response" in parsed or "status" in parsed:
-                        return parsed
-                except Exception:
-                    continue
+                    return json.loads(target_div.text)
+                except Exception as e:
+                    return {"status": "error", "response": f"JSON decode error: {str(e)}"}
             
-            # Jodi kono karone regex match na kore, tobe fallback response dibe
             return {
-                "status": "success",
-                "response": f"Shahajjo AI Response for: {text}",
-                "reply": f"Shahajjo AI Response for: {text}",
-                "message": f"Shahajjo AI Response for: {text}",
-                "text": f"Shahajjo AI Response for: {text}"
+                "status": "error",
+                "response": "Real JSON output tag not found in Streamlit HTML."
             }
         else:
             raise HTTPException(status_code=500, detail="Backend unreachable")
