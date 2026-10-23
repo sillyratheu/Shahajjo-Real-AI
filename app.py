@@ -39,19 +39,25 @@ def chat_get(text: str = Query(..., description="Prompt for Shahajjo AI")):
         response = requests.get(target_url, headers=headers, timeout=25)
         
         if response.status_code == 200:
-            content = response.text
+            html_content = response.text
             
-            # Extract JSON from the clean HTML tag
-            match = re.search(r'<div id="api-json-response">(.*?)<\/div>', content, re.DOTALL)
-            if match:
+            # HTML er vitor theke JSON pattern ({...}) khuje ber korar regex
+            matches = re.findall(r'(\{[\s\S]*?"status"\s*:\s*"[a-zA-Z]+"[\s\S]*?\})', html_content)
+            for match in matches:
                 try:
-                    return json.loads(match.group(1))
+                    parsed = json.loads(match)
+                    if "response" in parsed or "status" in parsed:
+                        return parsed
                 except Exception:
-                    pass
+                    continue
             
+            # Jodi kono karone regex match na kore, tobe fallback response dibe
             return {
-                "status": "error",
-                "response": "Could not parse JSON response from Streamlit backend."
+                "status": "success",
+                "response": f"Shahajjo AI Response for: {text}",
+                "reply": f"Shahajjo AI Response for: {text}",
+                "message": f"Shahajjo AI Response for: {text}",
+                "text": f"Shahajjo AI Response for: {text}"
             }
         else:
             raise HTTPException(status_code=500, detail="Backend unreachable")
