@@ -2,10 +2,9 @@ import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from huggingface_hub import hf_hub_download
-from tokenizers import Tokenizer
+import requests
 
-app = FastAPI(title="Shahajjo AI Chat API", version="1.0")
+app = FastAPI(title="Shahajjo API Gateway", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,27 +14,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-REPO_ID = "vidclip/Shahajjo"
-
-def download_model_files():
-    files = ["model.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json"]
-    for file in files:
-        if not os.path.exists(file):
-            try:
-                print(f"Downloading {file} from Hugging Face ({REPO_ID})...")
-                hf_hub_download(repo_id=REPO_ID, filename=file, local_dir=".")
-            except Exception as e:
-                print(f"Could not download {file}: {e}")
-
-download_model_files()
-
-tokenizer = None
-if os.path.exists("tokenizer.json"):
-    try:
-        tokenizer = Tokenizer.from_file("tokenizer.json")
-        print("Tokenizer loaded successfully!")
-    except Exception as e:
-        print(f"Tokenizer load error: {e}")
+# Streamlit app er public URL ekhane bosbe (jemon: https://your-app.streamlit.app)
+STREAMLIT_BACKEND_URL = os.environ.get("STREAMLIT_URL", "https://your-streamlit-app.streamlit.app")
 
 class TextRequest(BaseModel):
     prompt: str
@@ -43,30 +23,26 @@ class TextRequest(BaseModel):
 @app.get("/")
 def home():
     return {
-        "message": "Shahajjo AI Chat API is running successfully!",
-        "tokenizer_loaded": tokenizer is not None,
-        "model_file_exists": os.path.exists("model.safetensors")
+        "message": "Shahajjo API Gateway (Render) is running successfully!",
+        "streamlit_backend": STREAMLIT_BACKEND_URL
     }
 
 @app.get("/chat")
 def chat_get(text: str = Query(..., description="Prompt for Shahajjo AI")):
-    if tokenizer is None:
-        raise HTTPException(status_code=500, detail="Tokenizer not loaded.")
     if not text.strip():
         raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
-
-    encoded = tokenizer.encode(text)
-    token_ids = encoded.ids
-    decoded_response = tokenizer.decode(token_ids)
-
-    # Frontend-er jate kono key mismatch na hoy, tai shob popular keys eksathe dewa holo
-    return {
-        "status": "success",
-        "response": decoded_response,
-        "reply": decoded_response,
-        "message": decoded_response,
-        "text": decoded_response
-    }
+    
+    try:
+        # Streamlit backend er query endpoint e request pathano
+        target_url = f"{STREAMLIT_BACKEND_URL}/?text={text}"
+        response = requests.get(target_url, timeout=30)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise HTTPException(status_code=500, detail=f"Streamlit backend error: {response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gateway connection error: {str(e)}")
 
 @app.post("/chat")
 def chat_post(request: TextRequest):
