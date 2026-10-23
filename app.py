@@ -41,32 +41,17 @@ def chat_get(text: str = Query(..., description="Prompt for Shahajjo AI")):
         if response.status_code == 200:
             content = response.text
             
-            # Direct JSON parse try
-            try:
-                return response.json()
-            except Exception:
-                pass
-
-            # Extract JSON block from Streamlit HTML response
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', content, re.DOTALL)
-            if json_match:
-                extracted_json = json_match.group(1)
-                return json.loads(extracted_json)
-            
-            # Alternative JSON extraction attempt
-            json_match_raw = re.search(r'(\{[\s\S]*"response"[\s\S]*\})', content)
-            if json_match_raw:
+            # Extract JSON from the clean HTML tag
+            match = re.search(r'<div id="api-json-response">(.*?)<\/div>', content, re.DOTALL)
+            if match:
                 try:
-                    return json.loads(json_match_raw.group(1))
+                    return json.loads(match.group(1))
                 except Exception:
                     pass
-
+            
             return {
-                "status": "success",
-                "response": f"Streamlit processing complete for: {text}",
-                "reply": f"Streamlit processing complete for: {text}",
-                "message": f"Streamlit processing complete for: {text}",
-                "text": f"Streamlit processing complete for: {text}"
+                "status": "error",
+                "response": "Could not parse JSON response from Streamlit backend."
             }
         else:
             raise HTTPException(status_code=500, detail="Backend unreachable")
