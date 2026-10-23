@@ -59,10 +59,13 @@ def chat_get(text: str = Query(..., description="Prompt for Shahajjo AI")):
     token_ids = encoded.ids
     decoded_response = tokenizer.decode(token_ids)
 
+    # Frontend-er jate kono key mismatch na hoy, tai shob popular keys eksathe dewa holo
     return {
         "status": "success",
-        "prompt": text,
-        "response": decoded_response
+        "response": decoded_response,
+        "reply": decoded_response,
+        "message": decoded_response,
+        "text": decoded_response
     }
 
 @app.post("/chat")
