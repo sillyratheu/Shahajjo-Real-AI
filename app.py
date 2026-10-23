@@ -15,7 +15,7 @@ app.add_middleware(
 )
 
 # Streamlit app er public URL ekhane bosbe (jemon: https://your-app.streamlit.app)
-STREAMLIT_BACKEND_URL = os.environ.get("STREAMLIT_URL", "https://your-streamlit-app.streamlit.app")
+STREAMLIT_BACKEND_URL = os.environ.get("STREAMLIT_URL", "https://shahajjo.streamlit.app/")
 
 class TextRequest(BaseModel):
     prompt: str
