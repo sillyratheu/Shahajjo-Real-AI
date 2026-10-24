@@ -1,39 +1,34 @@
+from fastapi import FastAPI, Query, HTTPException
 import requests
 from bs4 import BeautifulSoup
 import json
 
-def get_shahajjo_response(user_text):
-    # Apnar Streamlit app-er URL
-    url = "https://shahajjo.streamlit.app/"
-    
-    # Query parameter hishebe text pathano
-    params = {"text": user_text}
+app = FastAPI(title="Shahajjo Render Gateway")
+
+# Tomar Streamlit backend URL
+STREAMLIT_URL = "https://shahajjo.streamlit.app/"
+
+@app.get("/chat")
+def chat(text: str = Query(..., description="Enter your prompt text")):
+    if not text:
+        raise HTTPException(status_code=400, detail="Please provide text parameter.")
     
     try:
-        # Request send kora
-        response = requests.get(url, params=params, timeout=10)
+        # Streamlit backend-e request pathano
+        resp = requests.get(STREAMLIT_URL, params={"text": text}, timeout=15)
         
-        if response.status_code != 200:
-            return {"status": "error", "response": f"HTTP Error: {response.status_code}"}
+        if resp.status_code != 200:
+            raise HTTPException(status_code=500, detail=f"Backend returned status {resp.status_code}")
         
-        # BeautifulSoup diye HTML parse kora
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Streamlit-er st.code() shadharoto <code> tag-er vitor thake
+        # BeautifulSoup diye Streamlit-er HTML theke st.code er JSON tulhe ana
+        soup = BeautifulSoup(resp.text, 'html.parser')
         code_tag = soup.find('code')
         
         if code_tag:
-            # Code tag-er vitorer text (JSON string) ke load kora
-            json_data = json.loads(code_tag.get_text())
-            return json_data
+            data = json.loads(code_tag.get_text())
+            return data
         else:
-            return {"status": "error", "response": "JSON response block not found in HTML page."}
+            raise HTTPException(status_code=500, detail="Could not parse response from Streamlit backend.")
             
     except Exception as e:
-        return {"status": "error", "response": f"Connection error: {str(e)}"}
-
-# --- Test korar jonno ---
-if __name__ == "__main__":
-    result = get_shahajjo_response("hi")
-    print("API Result:", result)
-    print("AI Response text:", result.get("response"))
+        raise HTTPException(status_code=500, detail=f"Gateway error: {str(e)}")
