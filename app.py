@@ -1,12 +1,12 @@
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import requests
-from bs4 import BeautifulSoup
+import re
 import json
 
 app = FastAPI(title="Shahajjo Render Gateway")
 
-# CORS Enable kora (Jate jekono front-end theke request nite pare)
+# CORS Enable kora
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,23 +17,47 @@ app.add_middleware(
 
 STREAMLIT_URL = "https://shahajjo.streamlit.app/"
 
+@app.get("/")
+def root():
+    return {
+        "message": "Shahajjo API Gateway is active!",
+        "backend": STREAMLIT_URL
+    }
+
 @app.get("/chat")
 def chat(text: str = Query(..., description="Enter your prompt text")):
     if not text:
         raise HTTPException(status_code=400, detail="Please provide text parameter.")
     
     try:
-        resp = requests.get(STREAMLittonUrl := STREAMLIT_URL, params={"text": text}, timeout=15)
+        # Streamlit backend-e request pathano
+        resp = requests.get(STREAMLIT_URL, params={"text": text}, timeout=25)
+        
         if resp.status_code != 200:
-            raise HTTPException(status_code=500, detail=f"Backend status {resp.status_code}")
+            return {
+                "status": "error",
+                "response": f"Backend returned status {resp.status_code}"
+            }
         
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        code_tag = soup.find('code')
+        html_content = resp.text
         
-        if code_tag:
-            return json.loads(code_tag.get_text())
+        # Regex diye HTML-er vitor theke JSON object ({ ... "status" ... }) khuje ber kora
+        json_match = re.search(r'(\{.*?"status"\s*:\s*"(?:success|error)".*?\})', html_content, re.DOTALL)
+        
+        if json_match:
+            json_str = json_match.group(1)
+            # Streamlit HTML entity gulo fix kora (jodi thake)
+            json_str = json_str.replace('&quot;', '"').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+            return json.loads(json_str)
         else:
-            raise HTTPException(status_code=500, detail="Could not parse Streamlit response.")
+            return {
+                "status": "error",
+                "response": "Could not extract JSON from Streamlit response.",
+                "debug_info": html_content[:300]
+            }
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gateway error: {str(e)}")
+        return {
+            "status": "error",
+            "response": f"Gateway error: {str(e)}"
+        }
